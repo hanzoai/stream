@@ -15,7 +15,7 @@ import (
 	"github.com/hanzoai/kafka/types"
 )
 
-// Two Hanzo Kafka instances pointing at the same NATS server
+// Two Hanzo Kafka instances pointing at the same PubSub server
 var TestConfig = types.Configuration{
 	PubSubUrl:        "nats://localhost:4222",
 	BrokerHost:     "localhost",
@@ -101,13 +101,14 @@ func TestProducerAndConsumer(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	// Consume via the second broker to verify shared NATS state
+	// Consume via the second broker to verify shared PubSub state
 	bootstrapServers2 := fmt.Sprintf("%s:%d", TestConfig2.BrokerHost, TestConfig2.BrokerPort)
 	consumerCmd := exec.Command(
 		filepath.Join(KafkaBinDir, "/kafka-console-consumer.sh"),
 		"--bootstrap-server", bootstrapServers2,
 		"--topic", topicName,
 		"--max-messages", nbRecords,
+		"--timeout-ms", "30000",
 		"--from-beginning",
 	)
 	output, err := consumerCmd.CombinedOutput()

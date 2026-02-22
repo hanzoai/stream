@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hanzoai/kafka/logging"
 	broker "github.com/hanzoai/kafka/protocol"
@@ -41,6 +42,7 @@ func TestMain(m *testing.M) {
 	b := broker.NewBroker(&TestConfig)
 
 	go b.Startup()
+	time.Sleep(2 * time.Second)
 
 	// Run the tests
 	exitCode := m.Run()
@@ -91,6 +93,7 @@ func TestProducerAndConsumer(t *testing.T) {
 		"--bootstrap-server", BootstrapServers,
 		"--topic", topicName,
 		"--max-messages", nbRecords,
+		"--timeout-ms", "30000",
 		"--from-beginning",
 	)
 	output, err := consumerCmd.CombinedOutput()
@@ -129,6 +132,7 @@ func TestGroupOffsetResume(t *testing.T) {
 		"--bootstrap-server", BootstrapServers,
 		"--topic", topicName,
 		"--max-messages", nbConsumedRecords,
+		"--timeout-ms", "30000",
 		"--consumer-property", "enable.auto.commit=true",
 		"--consumer-property", "group.id=test1",
 		"--from-beginning",
@@ -144,6 +148,7 @@ func TestGroupOffsetResume(t *testing.T) {
 		"--bootstrap-server", BootstrapServers,
 		"--topic", topicName,
 		"--max-messages", "1",
+		"--timeout-ms", "30000",
 		"--consumer-property", "group.id=test1",
 	)
 	output, err := consumerCmd.CombinedOutput()

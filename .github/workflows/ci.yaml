@@ -63,7 +63,8 @@ jobs:
       - name: Run tests
         run: |
           export KAFKA_BIN_DIR=/opt/kafka/bin
-          go test -v -count=1 ./test/e2e/...
+          go test -v -count=1 -timeout 5m ./test/e2e/...
+          go test -v -count=1 -timeout 5m ./test/cluster/...
 
   build-and-push:
     runs-on: ubuntu-latest
