@@ -1,12 +1,10 @@
 package protocol
 
 import (
-	log "github.com/CefBoud/monkafka/logging"
-	"github.com/CefBoud/monkafka/serde"
-	"github.com/CefBoud/monkafka/state"
-	"github.com/CefBoud/monkafka/storage"
-	"github.com/CefBoud/monkafka/types"
-	"github.com/CefBoud/monkafka/utils"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/serde"
+	"github.com/hanzoai/kafka/types"
+	"github.com/hanzoai/kafka/utils"
 )
 
 // ProduceRequest represents the details of a ProduceRequest.
@@ -81,7 +79,6 @@ func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest) {
 func (b *Broker) getProduceResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	produceRequest := &ProduceRequest{}
-	// for perf sensitive requests, we don't rely on reflection
 	decodeProduceRequest(decoder, produceRequest)
 	log.Debug("ProduceRequest %+v", produceRequest)
 	response := ProduceResponse{}
@@ -90,20 +87,24 @@ func (b *Broker) getProduceResponse(req types.Request) []byte {
 		produceTopicResponse := ProduceTopicResponse{Name: td.Name}
 		for _, pd := range td.PartitionData {
 			partitionResponse := ProducePartitionResponse{
-				Index:      pd.Index,
-				BaseOffset: 0} // TODO: should this be 0? probably not..
-			if state.PartitionExists(td.Name, pd.Index) {
-				err := storage.AppendRecord(td.Name, pd.Index, pd.Records)
-				if err != nil {
-					log.Error("Error AppendRecord: %v", err)
-				} else {
-					partitionResponse.LogAppendTimeMs = utils.NowAsUnixMilli()
-				}
-			} else {
+				Index: pd.Index,
+			}
+			_, err := b.PubSub.GetStreamInfo(td.Name, pd.Index)
+			if err != nil {
 				partitionResponse.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
 				partitionResponse.ErrorMessage = ErrUnknownTopicOrPartition.Message
+			} else {
+				seq, err := b.PubSub.Publish(td.Name, pd.Index, pd.Records)
+				if err != nil {
+					log.Error("Error publishing to PubSub: %v", err)
+					partitionResponse.ErrorCode = uint16(ErrUnknownServerError.Code)
+					partitionResponse.ErrorMessage = err.Error()
+				} else {
+					// NATS seq is 1-based, Kafka offset is 0-based
+					partitionResponse.BaseOffset = seq - 1
+					partitionResponse.LogAppendTimeMs = utils.NowAsUnixMilli()
+				}
 			}
-
 			produceTopicResponse.ProducePartitionResponses = append(produceTopicResponse.ProducePartitionResponses, partitionResponse)
 		}
 		response.ProduceTopicResponses = append(response.ProduceTopicResponses, produceTopicResponse)

@@ -1,8 +1,8 @@
 package protocol
 
 import (
-	"github.com/CefBoud/monkafka/serde"
-	"github.com/CefBoud/monkafka/types"
+	"github.com/hanzoai/kafka/serde"
+	"github.com/hanzoai/kafka/types"
 )
 
 // APIKey represents an API key and its supported version range.

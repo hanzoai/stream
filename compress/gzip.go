@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	log "github.com/CefBoud/monkafka/logging"
+	log "github.com/hanzoai/kafka/logging"
 )
 
 var (

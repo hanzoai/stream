@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"sync"
 
-	log "github.com/CefBoud/monkafka/logging"
+	log "github.com/hanzoai/kafka/logging"
 	"github.com/pierrec/lz4/v4"
 )
 

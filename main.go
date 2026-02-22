@@ -5,29 +5,25 @@ import (
 	"os/signal"
 	"syscall"
 
-	log "github.com/CefBoud/monkafka/logging"
-	"github.com/CefBoud/monkafka/protocol"
-	"github.com/CefBoud/monkafka/types"
-	"github.com/hashicorp/serf/serf"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/protocol"
+	"github.com/hanzoai/kafka/types"
 	"github.com/spf13/cobra"
 )
 
 var config = types.Configuration{
-	LogDir:                      os.TempDir(),
-	BrokerHost:                  "localhost",
-	BrokerPort:                  9092,
-	SerfConfig:                  serf.DefaultConfig(),
-	FlushIntervalMs:             5000,
-	LogRetentionCheckIntervalMs: 1000 * 30,           // 30 sec  //5 * 60 * 1000, // 5 min
-	LogRetentionMs:              24 * 60 * 60 * 1000, // (24h) //604800000 (7 days)
-	LogSegmentSizeBytes:         104857600 * 5,       // 500 MiB
-	LogSegmentMs:                1800000,             // 30 min
+	PubSubUrl:      "nats://localhost:4222",
+	BrokerHost:     "localhost",
+	BrokerPort:     9092,
+	NodeID:         1,
+	StreamReplicas: 1,
+	StorageType:    "file",
 }
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "broker",
-		Short: "Kafka broker with Raft protocol support",
+		Use:   "hanzo-kafka",
+		Short: "Hanzo Kafka — Kafka wire protocol gateway for Hanzo PubSub",
 		Run: func(cmd *cobra.Command, args []string) {
 			broker := protocol.NewBroker(&config)
 			log.SetLogLevel(log.DEBUG)
@@ -46,16 +42,15 @@ func main() {
 			broker.Startup()
 		},
 	}
-	// Add flags using Cobra
-	rootCmd.Flags().BoolVar(&config.Bootstrap, "bootstrap", false, "Indicates if this broker should bootstrap the first broker in the cluster")
-	rootCmd.Flags().IntVar(&config.NodeID, "node-id", -1, "Unique node ID for this broker instance")
-	rootCmd.MarkFlagRequired("node-id")
-	rootCmd.Flags().StringVar(&config.RaftAddress, "raft-addr", "localhost:2221", "The address where Raft will bind")
-	rootCmd.Flags().StringVar(&config.SerfAddress, "serf-addr", "127.0.0.1:3331", "The address where Serf will bind")
-	rootCmd.Flags().StringVar(&config.SerfJoinAddress, "serf-join", "", "The Serf Join address")
-	rootCmd.Flags().IntVar(&config.BrokerPort, "broker-port", 9092, "Port where the broker will listen for client connections")
 
-	// Execute the root command
+	rootCmd.Flags().StringVar(&config.PubSubUrl, "pubsub-url", "nats://localhost:4222", "Hanzo PubSub server URL")
+	rootCmd.Flags().StringVar(&config.PubSubCredFile, "pubsub-creds", "", "Hanzo PubSub credentials file")
+	rootCmd.Flags().IntVar(&config.BrokerPort, "port", 9092, "Kafka listener port")
+	rootCmd.Flags().StringVar(&config.BrokerHost, "host", "localhost", "Advertised hostname")
+	rootCmd.Flags().IntVar(&config.NodeID, "node-id", 1, "Broker node ID")
+	rootCmd.Flags().IntVar(&config.StreamReplicas, "replicas", 1, "Hanzo Stream replica count")
+	rootCmd.Flags().StringVar(&config.StorageType, "storage", "file", "Hanzo Stream storage type: file or memory")
+
 	if err := rootCmd.Execute(); err != nil {
 		log.Panic("Failed to execute root command %v", err)
 	}

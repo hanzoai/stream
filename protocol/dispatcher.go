@@ -1,6 +1,6 @@
 package protocol
 
-import "github.com/CefBoud/monkafka/types"
+import "github.com/hanzoai/kafka/types"
 
 // https://kafka.apache.org/protocol#protocol_api_keys
 var produceKey = uint16(0)
@@ -58,8 +58,4 @@ func (b *Broker) APIDispatcher(requestAPIKey uint16) APIKeyHandler {
 	default:
 		return APIKeyHandler{}
 	}
-
 }
-
-// ConsumerOffsetsTopic is the topic where consumers committed offsets are saved
-var ConsumerOffsetsTopic = "__consumer-offsets"

@@ -1,23 +1,18 @@
 package protocol
 
 import (
-	"os"
-
-	log "github.com/CefBoud/monkafka/logging"
-	"github.com/CefBoud/monkafka/serde"
-	"github.com/CefBoud/monkafka/state"
-	"github.com/CefBoud/monkafka/storage"
-	"github.com/CefBoud/monkafka/types"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/serde"
+	"github.com/hanzoai/kafka/types"
 )
 
-// ClusterID should be configurable?
-var ClusterID = "MONKAFKA-CLUSTER"
+// ClusterID identifies this Hanzo Kafka cluster
+var ClusterID = "HANZO-KAFKA-CLUSTER"
 
 // MinusOne used through variable because setting it as uint directly is rejected
 var MinusOne int = -1
 
 // DefaultNumPartition represents the num of partitions during creation if unspecified
-// TODO: make configurable
 const DefaultNumPartition = 1
 
 // InitProducerID (Api key = 22)
@@ -27,10 +22,10 @@ func (b *Broker) getInitProducerIDResponse(req types.Request) []byte {
 	log.Debug(" initProducerIDRequest %+v", initProducerIDRequest)
 
 	if int(initProducerIDRequest.ProducerID) == -1 {
-		initProducerIDRequest.ProducerID = 1 // TODO: set this value properly
+		initProducerIDRequest.ProducerID = 1
 	}
 	if int16(initProducerIDRequest.ProducerEpoch) == -1 {
-		initProducerIDRequest.ProducerEpoch = 1 // TODO: set this value properly
+		initProducerIDRequest.ProducerEpoch = 1
 	}
 
 	response := InitProducerIDResponse{
@@ -52,7 +47,7 @@ func (b *Broker) getJoinGroupResponse(req types.Request) []byte {
 		ProtocolType:   joinGroupRequest.ProtocolType,
 		ProtocolName:   joinGroupRequest.Protocols[0].Name,
 		Leader:         joinGroupRequest.MemberID,
-		SkipAssignment: false, // KIP-814 static membership (when false, the consumer group leader will send the assignments)
+		SkipAssignment: false,
 		MemberID:       joinGroupRequest.MemberID,
 		Members: []JoinGroupResponseMember{
 			{MemberID: joinGroupRequest.MemberID,
@@ -74,13 +69,11 @@ func (b *Broker) getSyncGroupResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	syncGroupRequest := decoder.Decode(&SyncGroupRequest{}).(*SyncGroupRequest)
 
-	// log.Debug("SyncGroupRequest %+v", syncGroupRequest)
 	response := SyncGroupResponse{
 		ProtocolType:    syncGroupRequest.ProtocolType,
 		ProtocolName:    syncGroupRequest.ProtocolName,
-		AssignmentBytes: syncGroupRequest.Assignments[0].Assignment, // TODO : handle this properly
+		AssignmentBytes: syncGroupRequest.Assignments[0].Assignment,
 	}
-	//  SyncGroupResponseData(throttleTimeMs=0, errorCode=0, protocolType='consumer', protocolName='range', assignment=[0, 3, 0, 0, 0, 1, 0, 4, 116, 105, 116, 105, 0, 0, 0, 1, 0, 0, 0, 0, -1, -1, -1, -1])
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }
@@ -97,9 +90,10 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 		for _, topic := range group.Topics {
 			t := OffsetFetchTopic{Name: topic.Name}
 			for _, partitionIndex := range topic.PartitionIndexes {
+				committedOffset, _ := b.PubSub.GetCommittedOffset(group.GroupID, topic.Name, partitionIndex)
 				t.Partitions = append(t.Partitions, OffsetFetchPartition{
 					PartitionIndex:  partitionIndex,
-					CommittedOffset: uint64(GetCommittedOffset(g.GroupID, topic.Name, partitionIndex)), // -1 triggers a ListOffsets request
+					CommittedOffset: uint64(committedOffset),
 				})
 			}
 			g.Topics = append(g.Topics, t)
@@ -113,21 +107,24 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 }
 
 func (b *Broker) getOffsetCommitResponse(req types.Request) []byte {
-
 	decoder := serde.NewDecoder(req.Body)
 	offsetCommitRequest := decoder.Decode(&OffsetCommitRequest{}).(*OffsetCommitRequest)
 	log.Debug("offsetCommitRequest %+v", offsetCommitRequest)
-
-	for _, recordBytes := range serializeConsumerOffsetRecord(offsetCommitRequest) {
-		storage.AppendRecord(ConsumerOffsetsTopic, 0, recordBytes)
-		UpdateGroupMetadataState(recordBytes)
-	}
 
 	response := OffsetCommitResponse{}
 	for _, topic := range offsetCommitRequest.Topics {
 		offsetCommitTopic := OffsetCommitResponseTopic{Name: topic.Name}
 		for _, p := range topic.Partitions {
-			offsetCommitTopic.Partitions = append(offsetCommitTopic.Partitions, OffsetCommitResponsePartition{PartitionIndex: p.PartitionIndex})
+			errCode := uint16(0)
+			err := b.PubSub.CommitOffset(
+				offsetCommitRequest.GroupID, topic.Name,
+				p.PartitionIndex, int64(p.CommittedOffset))
+			if err != nil {
+				log.Error("Error committing offset: %v", err)
+				errCode = uint16(ErrUnknownServerError.Code)
+			}
+			offsetCommitTopic.Partitions = append(offsetCommitTopic.Partitions,
+				OffsetCommitResponsePartition{PartitionIndex: p.PartitionIndex, ErrorCode: errCode})
 		}
 		response.Topics = append(response.Topics, offsetCommitTopic)
 	}
@@ -146,15 +143,19 @@ func (b *Broker) getListOffsetsResponse(req types.Request) []byte {
 		topic := ListOffsetsResponseTopic{Name: t.Name}
 		for _, p := range t.Partitions {
 			partition := ListOffsetsResponsePartition{PartitionIndex: p.PartitionIndex, LeaderEpoch: uint32(MinusOne)}
-			if p.Timestamp == uint64(ListOffsetsEarliestTimestamp) {
-				partition.Offset = state.GetPartition(t.Name, p.PartitionIndex).StartOffset()
+			info, err := b.PubSub.GetStreamInfo(t.Name, p.PartitionIndex)
+			if err != nil {
+				partition.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
+			} else if p.Timestamp == uint64(ListOffsetsEarliestTimestamp) {
+				if info.State.Msgs > 0 && info.State.FirstSeq > 0 {
+					partition.Offset = info.State.FirstSeq - 1 // 0-based
+				}
 			} else if p.Timestamp == uint64(ListOffsetsLatestTimestamp) {
-				partition.Offset = state.GetPartition(t.Name, p.PartitionIndex).EndOffset() + 1 // +1 to exclude the last msg
-				partition.Timestamp = state.GetPartition(t.Name, p.PartitionIndex).ActiveSegment().MaxTimestamp
+				if info.State.Msgs > 0 {
+					partition.Offset = info.State.LastSeq // next offset
+				}
 			} else {
-				// TODO: implement ListOffsetsMaxTimestamp
-				log.Error("ListOffsetsMaxTimestamp not implemented!")
-				os.Exit(1)
+				log.Error("ListOffsetsMaxTimestamp not implemented")
 			}
 			topic.Partitions = append(topic.Partitions, partition)
 		}

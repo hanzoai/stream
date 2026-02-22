@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"slices"
 
-	log "github.com/CefBoud/monkafka/logging"
-	"github.com/CefBoud/monkafka/types"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/types"
 )
 
 // Encoding is Big Endian as per the protocol
@@ -241,7 +241,7 @@ func ParseHeader(buffer []byte, connAddr string) types.Request {
 		return req
 	}
 	if buffer[bodyStart-1] != 0 {
-		log.Panic("Request header has non empty _tagged_fields, MonKafka doesn't currently support _tagged_fields.")
+		log.Panic("Request header has non empty _tagged_fields, Hanzo Kafka doesn't currently support _tagged_fields.")
 	}
 	req.Body = buffer[bodyStart:]
 	return req

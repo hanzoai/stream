@@ -1,62 +1,100 @@
-name: Go Lint, Vet, and Test with Java
+name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: hanzoai/kafka
 
 jobs:
-  lint-vet-test:
+  lint-and-vet:
     runs-on: ubuntu-latest
-    env:  
-      GO_VERSION: '1.23'           
-      JAVA_VERSION: '17'           
-      KAFKA_VERSION: '3.9.0'
-      SCALA_VERSION: '2.13'    
-
     steps:
-      # Checkout the repository
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - run: go vet ./...
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: latest
 
-      # Set up Go
-      - name: Set up Go
-        uses: actions/setup-go@v3
+  test:
+    runs-on: ubuntu-latest
+    needs: lint-and-vet
+    env:
+      GO_VERSION: '1.23'
+      JAVA_VERSION: '17'
+      KAFKA_VERSION: '3.9.0'
+      SCALA_VERSION: '2.13'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      # Run Go Lint
-      - name: Run Go Lint
+
+      - name: Install NATS server
         run: |
-          go install golang.org/x/lint/golint@latest
-          golint ./...
+          curl -sL https://github.com/nats-io/nats-server/releases/download/v2.10.24/nats-server-v2.10.24-linux-amd64.tar.gz | tar xz
+          sudo mv nats-server-v2.10.24-linux-amd64/nats-server /usr/local/bin/
 
-      # Run Go Vet
-      - name: Run Go Vet
-        run: go vet ./...
+      - name: Start NATS with JetStream
+        run: |
+          nats-server --jetstream --store_dir /tmp/nats-data &
+          sleep 2
 
-      # Install Java
       - uses: actions/setup-java@v4
         with:
           distribution: 'adopt'
-          java-version: ${{ env.JAVA_VERSION }} 
+          java-version: ${{ env.JAVA_VERSION }}
 
-      # Install Kafka by downloading and untaring
-      - name: Download and untar Kafka
+      - name: Download Kafka CLI tools
         run: |
-          KAFKA_VERSION="3.9.0"
-          SCALA_VERSION="2.13"
           KAFKA_TAR="kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz"
-          KAFKA_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TAR}"
-          curl -O $KAFKA_URL
-          tar -xvzf $KAFKA_TAR
-          sudo mv kafka_${SCALA_VERSION}-${KAFKA_VERSION} /opt/kafka
+          curl -sO "https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TAR}"
+          tar -xzf "${KAFKA_TAR}"
+          sudo mv "kafka_${SCALA_VERSION}-${KAFKA_VERSION}" /opt/kafka
 
-      # Run Go Tests
-      - name: Run Go Tests
+      - name: Run tests
         run: |
           export KAFKA_BIN_DIR=/opt/kafka/bin
-          go test -v ./...
+          go test -v -count=1 ./test/e2e/...
 
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [lint-and-vet, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

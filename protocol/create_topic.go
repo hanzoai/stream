@@ -1,13 +1,10 @@
 package protocol
 
 import (
-	"fmt"
-	"math/rand"
-
-	log "github.com/CefBoud/monkafka/logging"
-	"github.com/CefBoud/monkafka/raft"
-	"github.com/CefBoud/monkafka/serde"
-	"github.com/CefBoud/monkafka/types"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/serde"
+	"github.com/hanzoai/kafka/types"
+	"github.com/nats-io/nats.go"
 )
 
 // CreateTopicsResponse represents the response to a topic creation request.
@@ -64,7 +61,7 @@ type CreateTopicsResponseConfig struct {
 	IsSensitive  bool
 }
 
-// CreateTopics	(Api key = 19)
+// CreateTopics (Api key = 19)
 func (b *Broker) getCreateTopicResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	createTopicsRequest := decoder.Decode(&CreateTopicsRequest{}).(*CreateTopicsRequest)
@@ -72,7 +69,6 @@ func (b *Broker) getCreateTopicResponse(req types.Request) []byte {
 	response := CreateTopicsResponse{}
 
 	for _, topic := range createTopicsRequest.Topics {
-
 		if int32(topic.NumPartitions) == -1 {
 			topic.NumPartitions = DefaultNumPartition
 		}
@@ -81,65 +77,27 @@ func (b *Broker) getCreateTopicResponse(req types.Request) []byte {
 			TopicID:           [16]byte{},
 			NumPartitions:     topic.NumPartitions,
 			ReplicationFactor: topic.ReplicationFactor,
-			Configs:           []CreateTopicsResponseConfig{}, // TODO handle conf
+			Configs:           []CreateTopicsResponseConfig{},
 		}
 
-		if !b.IsController() {
-			log.Error("getCreateTopicResponse: not controller")
-			topicResponse.ErrorCode = uint16(ErrNotController.Code)
-			topicResponse.ErrorMessage = ErrNotController.Message
+		if b.PubSub.TopicExists(topic.Name) {
+			topicResponse.ErrorCode = uint16(ErrTopicAlreadyExists.Code)
+			topicResponse.ErrorMessage = ErrTopicAlreadyExists.Message
 		} else {
-			if b.FSM.TopicExists(topic.Name) {
-				topicResponse.ErrorCode = uint16(ErrTopicAlreadyExists.Code)
-				topicResponse.ErrorMessage = ErrTopicAlreadyExists.Message
-
-			} else {
-				configs := make(map[string]string)
-				for _, c := range topic.Configs {
-					configs[c.Name] = c.Value
-				}
-				err := b.CreateTopicPartitions(topic.Name, topic.NumPartitions, configs)
-				// resp, err := b.AppendRaftEntry(raft.AddTopic, raft.Topic{Name: topic.Name})
-				if err != nil {
-					log.Error("Error CreateTopicPartitions %v", err)
-				}
+			replicas := b.Config.StreamReplicas
+			if replicas < 1 {
+				replicas = 1
+			}
+			err := b.PubSub.CreateTopicStreams(topic.Name, topic.NumPartitions, replicas, nats.FileStorage)
+			if err != nil {
+				log.Error("Error creating topic streams: %v", err)
+				topicResponse.ErrorCode = uint16(ErrUnknownServerError.Code)
+				topicResponse.ErrorMessage = err.Error()
 			}
 		}
 		response.Topics = append(response.Topics, topicResponse)
-
 	}
 	log.Debug("CreateTopicResponse %+v", response)
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
-}
-
-// CreateTopicPartitions creates a new topic with its partition by appending them to the raft log.
-func (b *Broker) CreateTopicPartitions(name string, numPartitions uint32, configs map[string]string) error {
-	resp, err := b.AppendRaftEntry(raft.AddTopic, types.Topic{Name: name, Configs: configs})
-	if err != nil {
-		log.Error("Error append topic to raft log %v", err)
-	}
-	log.Debug("raft AddTopic entry for %v with configs [%+v]. Result: %v ", name, configs, resp)
-
-	nodes, err := b.GetClusterNodes()
-	if err != nil || len(nodes) < 1 {
-		return fmt.Errorf("CreateTopicPartitions GetClusterNodes error: %v", err)
-	}
-
-	for i := uint32(0); i < numPartitions; i++ {
-		// pick a leader randomly
-		leaderID := nodes[rand.Intn(len(nodes))].NodeID
-		partition := types.PartitionState{
-			Topic:          name,
-			PartitionIndex: i,
-			LeaderID:       leaderID,
-		}
-		log.Debug("adding partition %+v", partition)
-		resp, err = b.AppendRaftEntry(raft.AddPartition, partition)
-		if err != nil {
-			return fmt.Errorf("Error appending partition to raft log %v", err)
-		}
-		log.Debug("raft AddPartition entry for %v. Result: %v ", name, resp)
-	}
-	return nil
 }

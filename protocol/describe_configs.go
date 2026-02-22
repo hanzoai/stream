@@ -3,15 +3,14 @@ package protocol
 import (
 	"strconv"
 
-	log "github.com/CefBoud/monkafka/logging"
-	"github.com/CefBoud/monkafka/serde"
-	"github.com/CefBoud/monkafka/types"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/serde"
+	"github.com/hanzoai/kafka/types"
 )
 
 // ResourceType represents the kafka resource type (topic, group, etc.)
 type ResourceType int8
 
-// https://github.com/apache/kafka/blob/c6335c2ae86913954d940036917b7556e9ac0460/clients/src/main/java/org/apache/kafka/common/resource/ResourceType.java#L31
 const (
 	ResourceTypeUnknown         ResourceType = 0
 	ResourceTypeAny             ResourceType = 1
@@ -71,7 +70,7 @@ type DescribeConfigsResponseSynonym struct {
 	Source uint
 }
 
-// DescribeConfigs	(Api key = 32)
+// DescribeConfigs (Api key = 32)
 func (b *Broker) getDescribeConfigsResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	describeConfigsRequest := decoder.Decode(&DescribeConfigsRequest{}).(*DescribeConfigsRequest)
@@ -83,26 +82,19 @@ func (b *Broker) getDescribeConfigsResponse(req types.Request) []byte {
 			ResourceType: resourceConfReq.ResourceType,
 			ResourceName: resourceConfReq.ResourceName,
 		}
-		// TODO: handle other resource types
 		if ResourceType(resourceConfReq.ResourceType) == ResourceTypeTopic {
-			topic, ok := b.FSM.GetTopic(resourceConfReq.ResourceName)
-			if !ok {
+			numPartitions, err := b.PubSub.GetTopicPartitionCount(resourceConfReq.ResourceName)
+			if err != nil || numPartitions == 0 {
 				resourceResp.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
 				resourceResp.ErrorMessage = ErrUnknownTopicOrPartition.Message
 			} else {
 				resourceResp.Configs = append(resourceResp.Configs, DescribeConfigsResponseConfig{
 					Name:  "partitions",
-					Value: strconv.Itoa(len(topic.Partitions)),
+					Value: strconv.Itoa(int(numPartitions)),
 				})
-				for key, value := range topic.Configs {
-					resourceResp.Configs = append(resourceResp.Configs, DescribeConfigsResponseConfig{
-						Name:  key,
-						Value: value,
-					})
-				}
 			}
-			response.Results = append(response.Results, resourceResp)
 		}
+		response.Results = append(response.Results, resourceResp)
 	}
 	log.Debug("DescribeConfigsResponse %+v", response)
 	encoder := serde.NewEncoder()

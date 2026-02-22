@@ -3,11 +3,9 @@ package protocol
 import (
 	"time"
 
-	log "github.com/CefBoud/monkafka/logging"
-	"github.com/CefBoud/monkafka/serde"
-	"github.com/CefBoud/monkafka/state"
-	"github.com/CefBoud/monkafka/storage"
-	"github.com/CefBoud/monkafka/types"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/serde"
+	"github.com/hanzoai/kafka/types"
 )
 
 // FetchRequest represents the details of a FetchRequest (Version: 12).
@@ -79,7 +77,6 @@ type AbortedTransaction struct {
 }
 
 func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest) {
-
 	fetchRequest.ReplicaID = d.UInt32()
 	fetchRequest.MaxWaitMs = d.UInt32()
 	fetchRequest.MinBytes = d.UInt32()
@@ -113,7 +110,6 @@ func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest) {
 func (b *Broker) getFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	fetchRequest := &FetchRequest{}
-	// for perf sensitive requests, we don't rely on reflection
 	decodeFetchRequest(decoder, fetchRequest)
 	log.Debug("fetchRequest %+v", fetchRequest)
 
@@ -122,38 +118,49 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 	for _, tp := range fetchRequest.Topics {
 		fetchTopicResponse := FetchTopicResponse{TopicName: tp.Name}
 		for _, p := range tp.Partitions {
-			partition, exists := b.FSM.GetPartition(tp.Name, p.PartitionIndex)
-			if !exists {
-				response.ErrorCode = uint16(ErrReplicaNotAvailable.Code)
-				goto FINISH
-			}
-			if partition.LeaderID != b.FSM.NodeID {
-				log.Error("Fetch: Not leader for partition %v-%v", partition.Topic, partition.PartitionIndex)
-				response.ErrorCode = uint16(ErrNotLeaderOrFollower.Code)
-				goto FINISH
-			}
-			recordBytes, err := storage.GetRecordBatch(p.FetchOffset, tp.Name, p.PartitionIndex)
-			// log.Debug("getFetchResponse GetRecord recordBytes %v", recordBytes)
-			numTotalRecordBytes += len(recordBytes)
+			info, err := b.PubSub.GetStreamInfo(tp.Name, p.PartitionIndex)
 			if err != nil {
-				log.Error("Error while fetching record at currentOffset:%v  for topic %v-%v | err: %v", uint32(p.FetchOffset), tp, p.PartitionIndex, err)
+				response.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
+				goto FINISH
+			}
+
+			var recordBytes []byte
+			// Convert Kafka offset (0-based) to NATS sequence (1-based)
+			pubsubSeq := p.FetchOffset + 1
+			if pubsubSeq <= info.State.LastSeq && info.State.Msgs > 0 {
+				msg, err := b.PubSub.GetMessage(tp.Name, p.PartitionIndex, pubsubSeq)
+				if err != nil {
+					log.Error("Error fetching from PubSub seq %d: %v", pubsubSeq, err)
+				} else {
+					recordBytes = msg.Data
+					numTotalRecordBytes += len(recordBytes)
+				}
+			}
+
+			// Map NATS sequences to Kafka offsets
+			highWatermark := uint64(0)
+			logStartOffset := uint64(0)
+			if info.State.Msgs > 0 {
+				highWatermark = info.State.LastSeq // next offset after last
+				if info.State.FirstSeq > 0 {
+					logStartOffset = info.State.FirstSeq - 1
+				}
 			}
 
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{
 					PartitionIndex:   p.PartitionIndex,
-					HighWatermark:    state.GetPartition(tp.Name, p.PartitionIndex).EndOffset(), //uint64(MinusOne),
+					HighWatermark:    highWatermark,
 					LastStableOffset: uint64(MinusOne),
-					LogStartOffset:   state.GetPartition(tp.Name, p.PartitionIndex).StartOffset(),
-					// PreferredReadReplica: 1,
-					Records: recordBytes,
+					LogStartOffset:   logStartOffset,
+					Records:          recordBytes,
 				})
 		}
 		response.Responses = append(response.Responses, fetchTopicResponse)
 	}
 	if numTotalRecordBytes == 0 {
-		log.Info("There is no data available for this fetch request, waiting for a bit ..")
-		time.Sleep(300 * time.Millisecond) // TODO get this from consumer settings
+		log.Info("No data available for this fetch, waiting briefly")
+		time.Sleep(300 * time.Millisecond)
 	}
 FINISH:
 	encoder := serde.NewEncoder()
