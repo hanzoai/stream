@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"slices"
 
-	log "github.com/hanzoai/kafka/logging"
-	"github.com/hanzoai/kafka/types"
+	log "github.com/hanzoai/stream/logging"
+	"github.com/hanzoai/stream/types"
 )
 
 // Encoding is Big Endian as per the protocol

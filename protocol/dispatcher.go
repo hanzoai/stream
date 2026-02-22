@@ -1,6 +1,6 @@
 package protocol
 
-import "github.com/hanzoai/kafka/types"
+import "github.com/hanzoai/stream/types"
 
 // https://kafka.apache.org/protocol#protocol_api_keys
 var produceKey = uint16(0)

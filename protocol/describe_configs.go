@@ -3,9 +3,9 @@ package protocol
 import (
 	"strconv"
 
-	log "github.com/hanzoai/kafka/logging"
-	"github.com/hanzoai/kafka/serde"
-	"github.com/hanzoai/kafka/types"
+	log "github.com/hanzoai/stream/logging"
+	"github.com/hanzoai/stream/serde"
+	"github.com/hanzoai/stream/types"
 )
 
 // ResourceType represents the kafka resource type (topic, group, etc.)

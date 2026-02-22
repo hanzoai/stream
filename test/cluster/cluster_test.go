@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/kafka/logging"
-	broker "github.com/hanzoai/kafka/protocol"
-	"github.com/hanzoai/kafka/types"
+	"github.com/hanzoai/stream/logging"
+	broker "github.com/hanzoai/stream/protocol"
+	"github.com/hanzoai/stream/types"
 )
 
 // Two Hanzo Kafka instances pointing at the same PubSub server

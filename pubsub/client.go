@@ -3,7 +3,7 @@ package pubsub
 import (
 	"fmt"
 
-	log "github.com/hanzoai/kafka/logging"
+	log "github.com/hanzoai/stream/logging"
 	"github.com/nats-io/nats.go"
 )
 

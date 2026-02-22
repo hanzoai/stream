@@ -1,17 +1,17 @@
-# Hanzo Kafka — LLM.md
+# Hanzo Stream — LLM.md
 
 ## Overview
-Hanzo Kafka is a thin, stateless Kafka wire protocol gateway that translates Kafka client requests to Hanzo Stream (JetStream) operations against Hanzo PubSub. Standard Kafka clients connect on `:9092`; all storage and replication is delegated to Hanzo Stream.
+Hanzo Stream is a stateless Kafka wire protocol gateway that translates Kafka client requests to Hanzo Stream (JetStream) operations against Hanzo PubSub. Standard Kafka clients connect on `:9092`; all storage and replication is delegated to Hanzo PubSub.
 
 ## Architecture
 ```
-Kafka Client → TCP :9092 → Hanzo Kafka (protocol translation) → Hanzo PubSub (Hanzo Stream)
+Kafka Client → TCP :9092 → Hanzo Stream (protocol translation) → Hanzo PubSub
 ```
 
-**Stateless broker**: All state lives in Hanzo Stream. Multiple Hanzo Kafka instances can point at the same PubSub cluster.
+**Stateless gateway**: All state lives in Hanzo PubSub. Multiple instances can share the same PubSub cluster.
 
-## Kafka-to-Hanzo Stream Mapping
-| Kafka Concept | Hanzo Stream Equivalent |
+## Kafka-to-PubSub Mapping
+| Kafka Concept | PubSub Equivalent |
 |---|---|
 | Topic `foo`, Partition N | Stream `kafka-foo-N`, Subject `kafka.foo.N` |
 | Produce | `Publish("kafka.foo.0", recordBatchBytes)` → seq = offset+1 |
@@ -30,10 +30,10 @@ Fetch:   msg = GetMsg(offset + 1)
 
 ## Module Structure
 ```
-github.com/hanzoai/kafka
+github.com/hanzoai/stream
 ├── main.go              # CLI entry point (cobra)
 ├── pubsub/              # Hanzo PubSub client wrapper
-│   ├── client.go        # Connection + Hanzo Stream context
+│   ├── client.go        # Connection + stream context
 │   ├── streams.go       # Stream CRUD, publish, get message, list topics
 │   └── consumer.go      # KV-based consumer offset management
 ├── protocol/            # Kafka wire protocol handlers
@@ -60,21 +60,21 @@ github.com/hanzoai/kafka
 - **One stream per partition** ensures clean 1:1 offset-sequence mapping
 - **Produce/Fetch use hand-written decoders** (not reflection) for performance
 - **All other handlers use reflection-based serde** via tagged structs
-- **KV bucket for consumer offsets** instead of __consumer-offsets topic + custom serialization
+- **KV bucket for consumer offsets** instead of __consumer-offsets topic
 - **No local storage, no Raft, no Serf** — pure protocol translation
 
 ## Dependencies
-- `github.com/nats-io/nats.go` — Hanzo PubSub client + Hanzo Stream
+- `github.com/nats-io/nats.go` — Hanzo PubSub client
 - `github.com/spf13/cobra` — CLI
 - Compression: klauspost/compress (zstd), pierrec/lz4, eapache/go-xerial-snappy
 - Zero hashicorp dependencies
 
 ## Running
 ```bash
-# Start Hanzo PubSub with Hanzo Stream
+# Start Hanzo PubSub
 nats-server --jetstream
 
-# Start Hanzo Kafka
+# Start Hanzo Stream
 go run main.go --pubsub-url nats://localhost:4222 --port 9092
 
 # Use standard Kafka CLI tools
@@ -86,10 +86,10 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test --from-
 ## Deployment (hanzo-k8s)
 ```
 Namespace: hanzo
-PubSub:    pubsub.hanzo.svc:4222  (NATS with Hanzo Stream enabled)
-Kafka:     kafka.hanzo.svc:9092   (ghcr.io/hanzoai/kafka)
+PubSub:    pubsub.hanzo.svc:4222
+Stream:    stream.hanzo.svc:9092   (ghcr.io/hanzoai/stream)
 ```
 
 ## Tests
 - `test/e2e/` — E2E tests using Kafka CLI binaries (requires `KAFKA_BIN_DIR`)
-- `test/cluster/` — Multi-instance tests (two brokers sharing same PubSub)
+- `test/cluster/` — Multi-instance tests (two gateways sharing same PubSub)

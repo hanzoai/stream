@@ -1,9 +1,9 @@
 package protocol
 
 import (
-	log "github.com/hanzoai/kafka/logging"
-	"github.com/hanzoai/kafka/serde"
-	"github.com/hanzoai/kafka/types"
+	log "github.com/hanzoai/stream/logging"
+	"github.com/hanzoai/stream/serde"
+	"github.com/hanzoai/stream/types"
 )
 
 // FindCoordinatorRequestV1To3 represents the request for coordinator finding

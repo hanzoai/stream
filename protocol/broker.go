@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	log "github.com/hanzoai/kafka/logging"
-	"github.com/hanzoai/kafka/pubsub"
-	"github.com/hanzoai/kafka/serde"
-	"github.com/hanzoai/kafka/types"
+	log "github.com/hanzoai/stream/logging"
+	"github.com/hanzoai/stream/pubsub"
+	"github.com/hanzoai/stream/serde"
+	"github.com/hanzoai/stream/types"
 )
 
 // Broker represents a Hanzo Kafka broker instance

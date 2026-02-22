@@ -1,4 +1,4 @@
-module github.com/hanzoai/kafka
+module github.com/hanzoai/stream
 
 go 1.23.4
 

@@ -5,9 +5,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	log "github.com/hanzoai/kafka/logging"
-	"github.com/hanzoai/kafka/protocol"
-	"github.com/hanzoai/kafka/types"
+	log "github.com/hanzoai/stream/logging"
+	"github.com/hanzoai/stream/protocol"
+	"github.com/hanzoai/stream/types"
 	"github.com/spf13/cobra"
 )
 
@@ -22,8 +22,8 @@ var config = types.Configuration{
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "hanzo-kafka",
-		Short: "Hanzo Kafka — Kafka wire protocol gateway for Hanzo PubSub",
+		Use:   "hanzo-stream",
+		Short: "Hanzo Stream — Kafka wire protocol gateway for Hanzo PubSub",
 		Run: func(cmd *cobra.Command, args []string) {
 			broker := protocol.NewBroker(&config)
 			log.SetLogLevel(log.DEBUG)

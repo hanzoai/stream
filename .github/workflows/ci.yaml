@@ -8,7 +8,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: hanzoai/kafka
+  IMAGE_NAME: hanzoai/stream
 
 jobs:
   lint-and-vet:

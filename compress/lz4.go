@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"sync"
 
-	log "github.com/hanzoai/kafka/logging"
+	log "github.com/hanzoai/stream/logging"
 	"github.com/pierrec/lz4/v4"
 )
 

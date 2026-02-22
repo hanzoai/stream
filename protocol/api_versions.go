@@ -1,8 +1,8 @@
 package protocol
 
 import (
-	"github.com/hanzoai/kafka/serde"
-	"github.com/hanzoai/kafka/types"
+	"github.com/hanzoai/stream/serde"
+	"github.com/hanzoai/stream/types"
 )
 
 // APIKey represents an API key and its supported version range.
