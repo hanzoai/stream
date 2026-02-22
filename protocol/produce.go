@@ -73,7 +73,6 @@ func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest) {
 		produceRequest.TopicData = append(produceRequest.TopicData, topic)
 		d.EndStruct()
 	}
-	return
 }
 
 func (b *Broker) getProduceResponse(req types.Request) []byte {

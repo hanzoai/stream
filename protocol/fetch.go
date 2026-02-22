@@ -104,7 +104,6 @@ func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest) {
 		fetchRequest.Topics = append(fetchRequest.Topics, topic)
 		d.EndStruct()
 	}
-	return
 }
 
 func (b *Broker) getFetchResponse(req types.Request) []byte {

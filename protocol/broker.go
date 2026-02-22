@@ -95,7 +95,7 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 			log.Error("Error writing to connection: %v", err)
 			break
 		}
-		d := time.Now().Sub(startTime)
+		d := time.Since(startTime)
 		log.Trace("handleConnection Iteration took %v", d)
 	}
 	log.Debug("Connection with %s closed.", connectionAddr)
