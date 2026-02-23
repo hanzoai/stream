@@ -6,12 +6,6 @@ import (
 	"github.com/hanzoai/stream/types"
 )
 
-// FindCoordinatorRequestV1To3 represents the request for coordinator finding
-type FindCoordinatorRequestV1To3 struct {
-	Key     types.NonCompactString
-	KeyType uint8
-}
-
 // FindCoordinatorRequestV4Plus represents the request for coordinator finding
 type FindCoordinatorRequestV4Plus struct {
 	KeyType         uint8
@@ -42,11 +36,17 @@ func (b *Broker) getFindCoordinatorResponse(req types.Request) []byte {
 		// v0: Key (STRING only, no KeyType)
 		key = decoder.NullableString()
 		log.Info("FindCoordinatorRequest v0 key=%q", key)
-	} else if req.RequestAPIVersion < 4 {
-		// v1-v3: non-flexible, Key (STRING) + KeyType (INT8)
-		findCoordinatorRequest := decoder.Decode(&FindCoordinatorRequestV1To3{}).(*FindCoordinatorRequestV1To3)
-		log.Info("FindCoordinatorRequestV1To3 %+v", findCoordinatorRequest)
-		key = string(findCoordinatorRequest.Key)
+	} else if req.RequestAPIVersion < 3 {
+		// v1-v2: non-flexible, Key (STRING) + KeyType (INT8)
+		key = decoder.NullableString()
+		_ = decoder.UInt8() // keyType (0=group, 1=txn)
+		log.Info("FindCoordinatorRequest v%d key=%q", req.RequestAPIVersion, key)
+	} else if req.RequestAPIVersion == 3 {
+		// v3: flexible, Key (COMPACT_STRING) + KeyType (INT8)
+		key = decoder.CompactString()
+		_ = decoder.UInt8() // keyType
+		decoder.EndStruct() // tagged fields
+		log.Info("FindCoordinatorRequest v3 key=%q", key)
 	} else {
 		// v4+: flexible, KeyType (INT8) + CoordinatorKeys (COMPACT_ARRAY)
 		findCoordinatorRequest := decoder.Decode(&FindCoordinatorRequestV4Plus{}).(*FindCoordinatorRequestV4Plus)
