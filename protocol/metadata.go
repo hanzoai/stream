@@ -80,7 +80,7 @@ func decodeMetadataRequest(d serde.Decoder, req *MetadataRequest, apiVersion uin
 		arrayLen := int(int32(d.UInt32()))
 		if arrayLen > 0 {
 			for i := 0; i < arrayLen; i++ {
-				topic := MetadataRequestTopic{Name: string(d.String())}
+				topic := MetadataRequestTopic{Name: d.NullableString()}
 				req.Topics = append(req.Topics, topic)
 			}
 		}
