@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	log "github.com/hanzoai/stream/logging"
@@ -19,6 +20,106 @@ type Broker struct {
 	Config         *types.Configuration
 	PubSub         *pubsub.Client
 	ShutDownSignal chan bool
+	partitionMu    sync.Map // map[string]*sync.Mutex keyed by "topic-partition"
+}
+
+// partitionLock returns a mutex for a topic+partition, ensuring safe concurrent offset assignment.
+func (b *Broker) partitionLock(topic string, partition uint32) *sync.Mutex {
+	key := fmt.Sprintf("%s-%d", topic, partition)
+	v, _ := b.partitionMu.LoadOrStore(key, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
+// nextKafkaOffset computes the next Kafka record offset for a partition by reading
+// the last stored RecordBatch header. Must be called while holding the partition lock.
+func (b *Broker) nextKafkaOffset(topic string, partition uint32) (int64, error) {
+	info, err := b.PubSub.GetStreamInfo(topic, partition)
+	if err != nil {
+		return 0, err
+	}
+	if info.State.Msgs == 0 {
+		return 0, nil
+	}
+	lastMsg, err := b.PubSub.GetMessage(topic, partition, info.State.LastSeq)
+	if err != nil {
+		return 0, fmt.Errorf("read last message seq %d: %w", info.State.LastSeq, err)
+	}
+	header, err := ParseRecordBatchHeader(lastMsg.Data)
+	if err != nil {
+		return 0, fmt.Errorf("parse last record batch: %w", err)
+	}
+	return header.BaseOffset + header.OffsetCount(), nil
+}
+
+// kafkaHighWatermark returns the next Kafka offset after the last stored record.
+func (b *Broker) kafkaHighWatermark(topic string, partition uint32) uint64 {
+	info, err := b.PubSub.GetStreamInfo(topic, partition)
+	if err != nil || info.State.Msgs == 0 {
+		return 0
+	}
+	lastMsg, err := b.PubSub.GetMessage(topic, partition, info.State.LastSeq)
+	if err != nil {
+		return 0
+	}
+	header, err := ParseRecordBatchHeader(lastMsg.Data)
+	if err != nil {
+		return 0
+	}
+	return uint64(header.BaseOffset + header.OffsetCount())
+}
+
+// kafkaLogStartOffset returns the Kafka offset of the first stored record.
+func (b *Broker) kafkaLogStartOffset(topic string, partition uint32) uint64 {
+	info, err := b.PubSub.GetStreamInfo(topic, partition)
+	if err != nil || info.State.Msgs == 0 {
+		return 0
+	}
+	firstMsg, err := b.PubSub.GetMessage(topic, partition, info.State.FirstSeq)
+	if err != nil {
+		return 0
+	}
+	header, err := ParseRecordBatchHeader(firstMsg.Data)
+	if err != nil {
+		return 0
+	}
+	return uint64(header.BaseOffset)
+}
+
+// findSequenceForOffset uses binary search to find the NATS sequence
+// containing the given Kafka offset. Returns 0 if not found.
+func (b *Broker) findSequenceForOffset(topic string, partition uint32, offset uint64) uint64 {
+	info, err := b.PubSub.GetStreamInfo(topic, partition)
+	if err != nil || info.State.Msgs == 0 {
+		return 0
+	}
+
+	lo := info.State.FirstSeq
+	hi := info.State.LastSeq
+
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		msg, err := b.PubSub.GetMessage(topic, partition, mid)
+		if err != nil {
+			return 0
+		}
+		header, err := ParseRecordBatchHeader(msg.Data)
+		if err != nil {
+			return 0
+		}
+
+		batchStart := uint64(header.BaseOffset)
+		batchEnd := batchStart + uint64(header.LastOffsetDelta)
+
+		if offset < batchStart {
+			hi = mid - 1
+		} else if offset > batchEnd {
+			lo = mid + 1
+		} else {
+			return mid
+		}
+	}
+
+	return 0
 }
 
 // NewBroker creates a new Broker instance with the provided configuration
