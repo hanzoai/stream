@@ -207,11 +207,12 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{
-					PartitionIndex:   p.PartitionIndex,
-					HighWatermark:    highWatermark,
-					LastStableOffset: uint64(MinusOne),
-					LogStartOffset:   logStartOffset,
-					Records:          recordBytes,
+					PartitionIndex:       p.PartitionIndex,
+					HighWatermark:        highWatermark,
+					LastStableOffset:     uint64(MinusOne),
+					LogStartOffset:       logStartOffset,
+					PreferredReadReplica: uint32(MinusOne), // -1 = no preferred replica
+					Records:              recordBytes,
 				})
 		}
 		response.Responses = append(response.Responses, fetchTopicResponse)
