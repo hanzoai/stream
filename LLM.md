@@ -83,12 +83,13 @@ kafka-console-producer.sh --bootstrap-server localhost:9092 --topic test
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test --from-beginning
 ```
 
-## Deployment (hanzo-k8s)
+## Deployment (hanzo-k8s, do-sfo3)
 ```
 Namespace: hanzo
-PubSub:    pubsub.hanzo.svc:4222
-Stream:    stream.hanzo.svc:9092   (ghcr.io/hanzoai/stream)
+PubSub:    pubsub.hanzo.svc:4222   (nats:2.10-alpine, 1 replica, 20Gi PVC)
+Stream:    stream.hanzo.svc:9092   (ghcr.io/hanzoai/stream:latest, 2 replicas)
 ```
+Dockerfile builds linux/amd64 via `GOARCH=amd64`. CI pushes to GHCR on every main push.
 
 ## Tests
 - `test/e2e/` — E2E tests using Kafka CLI binaries (requires `KAFKA_BIN_DIR`)
