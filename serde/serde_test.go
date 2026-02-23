@@ -6,26 +6,19 @@ import (
 )
 
 func TestParseHeader_NonFlexible(t *testing.T) {
-	// Simulate a Produce v8 request (non-flexible, threshold is v9)
+	// Produce v8 (non-flexible, threshold is v9)
 	// Header v1: api_key(2) + api_version(2) + correlation_id(4) + client_id(int16 len + bytes) + body
 	clientID := "rdkafka"
 	bodyPayload := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 
 	buf := make([]byte, 0, 128)
-	// length placeholder (4 bytes)
 	buf = append(buf, 0, 0, 0, 0)
-	// api_key = 0 (Produce)
-	buf = binary.BigEndian.AppendUint16(buf, 0)
-	// api_version = 8 (non-flexible)
-	buf = binary.BigEndian.AppendUint16(buf, 8)
-	// correlation_id = 42
+	buf = binary.BigEndian.AppendUint16(buf, 0) // api_key = Produce
+	buf = binary.BigEndian.AppendUint16(buf, 8) // non-flexible
 	buf = binary.BigEndian.AppendUint32(buf, 42)
-	// client_id: int16 length + bytes
 	buf = binary.BigEndian.AppendUint16(buf, uint16(len(clientID)))
 	buf = append(buf, []byte(clientID)...)
-	// body
 	buf = append(buf, bodyPayload...)
-	// fill in length
 	binary.BigEndian.PutUint32(buf, uint32(len(buf)-4))
 
 	req := ParseHeader(buf, "127.0.0.1:1234")
@@ -52,28 +45,24 @@ func TestParseHeader_NonFlexible(t *testing.T) {
 }
 
 func TestParseHeader_Flexible(t *testing.T) {
-	// Simulate a Produce v9 request (flexible)
-	// Header v2: api_key(2) + api_version(2) + correlation_id(4) + client_id(uvarint compact len + bytes) + tagged_fields(uvarint 0) + body
+	// Produce v9 (flexible)
+	// Header v2: api_key(2) + api_version(2) + correlation_id(4) + client_id(int16 NULLABLE_STRING) + tagged_fields(uvarint 0) + body
+	// Note: client_id is ALWAYS int16-prefixed NULLABLE_STRING, even in header v2
 	clientID := "rdkafka"
 	bodyPayload := []byte{0xCA, 0xFE, 0xBA, 0xBE}
 
 	buf := make([]byte, 0, 128)
-	// length placeholder (4 bytes)
 	buf = append(buf, 0, 0, 0, 0)
-	// api_key = 0 (Produce)
-	buf = binary.BigEndian.AppendUint16(buf, 0)
-	// api_version = 9 (flexible)
-	buf = binary.BigEndian.AppendUint16(buf, 9)
-	// correlation_id = 99
+	buf = binary.BigEndian.AppendUint16(buf, 0) // api_key = Produce
+	buf = binary.BigEndian.AppendUint16(buf, 9) // flexible
 	buf = binary.BigEndian.AppendUint32(buf, 99)
-	// client_id: compact string (uvarint length = actual_len + 1)
-	buf = append(buf, byte(len(clientID)+1)) // uvarint fits in 1 byte
+	// client_id: int16 length + bytes (same as non-flexible!)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(clientID)))
 	buf = append(buf, []byte(clientID)...)
-	// tagged_fields: 0 fields
+	// tagged_fields: 0 fields (uvarint 0)
 	buf = append(buf, 0)
 	// body
 	buf = append(buf, bodyPayload...)
-	// fill in length
 	binary.BigEndian.PutUint32(buf, uint32(len(buf)-4))
 
 	req := ParseHeader(buf, "10.0.0.1:9092")
@@ -100,30 +89,26 @@ func TestParseHeader_Flexible(t *testing.T) {
 }
 
 func TestParseHeader_FlexibleWithTaggedFields(t *testing.T) {
-	// Simulate a Produce v10 request with 1 tagged field
+	// Produce v10 (flexible) with 1 tagged field in header
 	clientID := "test-client"
 	bodyPayload := []byte{0x01, 0x02, 0x03}
 	tagData := []byte{0xAA, 0xBB}
 
 	buf := make([]byte, 0, 128)
-	// length placeholder
 	buf = append(buf, 0, 0, 0, 0)
-	// api_key = 0 (Produce), api_version = 10
-	buf = binary.BigEndian.AppendUint16(buf, 0)
-	buf = binary.BigEndian.AppendUint16(buf, 10)
-	// correlation_id = 7
+	buf = binary.BigEndian.AppendUint16(buf, 0)  // Produce
+	buf = binary.BigEndian.AppendUint16(buf, 10) // flexible
 	buf = binary.BigEndian.AppendUint32(buf, 7)
-	// client_id: compact string
-	buf = append(buf, byte(len(clientID)+1))
+	// client_id: int16 length + bytes
+	buf = binary.BigEndian.AppendUint16(buf, uint16(len(clientID)))
 	buf = append(buf, []byte(clientID)...)
 	// tagged_fields: 1 field
-	buf = append(buf, 1)    // numFields = 1
-	buf = append(buf, 0)    // tag = 0
-	buf = append(buf, 2)    // data length = 2
+	buf = append(buf, 1) // numFields = 1
+	buf = append(buf, 0) // tag = 0
+	buf = append(buf, 2) // data length = 2
 	buf = append(buf, tagData...)
 	// body
 	buf = append(buf, bodyPayload...)
-	// fill in length
 	binary.BigEndian.PutUint32(buf, uint32(len(buf)-4))
 
 	req := ParseHeader(buf, "10.0.0.1:9092")
@@ -141,16 +126,15 @@ func TestParseHeader_FlexibleWithTaggedFields(t *testing.T) {
 }
 
 func TestParseHeader_ApiVersionsAlwaysNonFlexible(t *testing.T) {
-	// ApiVersions v3 should use non-flexible header (bootstrap exception)
+	// ApiVersions v3 — always non-flexible request header (bootstrap exception)
 	clientID := "rdkafka"
 	bodyPayload := []byte{0xFF}
 
 	buf := make([]byte, 0, 64)
-	buf = append(buf, 0, 0, 0, 0) // length placeholder
-	buf = binary.BigEndian.AppendUint16(buf, 18) // api_key = 18 (ApiVersions)
-	buf = binary.BigEndian.AppendUint16(buf, 3)  // v3 (would be flexible for other APIs, but not ApiVersions)
-	buf = binary.BigEndian.AppendUint32(buf, 1)  // correlation_id
-	// Non-flexible header: int16 len + bytes
+	buf = append(buf, 0, 0, 0, 0)
+	buf = binary.BigEndian.AppendUint16(buf, 18) // ApiVersions
+	buf = binary.BigEndian.AppendUint16(buf, 3)
+	buf = binary.BigEndian.AppendUint32(buf, 1)
 	buf = binary.BigEndian.AppendUint16(buf, uint16(len(clientID)))
 	buf = append(buf, []byte(clientID)...)
 	buf = append(buf, bodyPayload...)
@@ -165,5 +149,28 @@ func TestParseHeader_ApiVersionsAlwaysNonFlexible(t *testing.T) {
 	}
 	if len(req.Body) != 1 || req.Body[0] != 0xFF {
 		t.Fatalf("expected body [0xFF], got %v", req.Body)
+	}
+}
+
+func TestParseHeader_NullClientID(t *testing.T) {
+	// Flexible request with null client_id (int16 = -1 = 0xFFFF)
+	bodyPayload := []byte{0x42}
+
+	buf := make([]byte, 0, 64)
+	buf = append(buf, 0, 0, 0, 0)
+	buf = binary.BigEndian.AppendUint16(buf, 0)  // Produce
+	buf = binary.BigEndian.AppendUint16(buf, 11) // flexible
+	buf = binary.BigEndian.AppendUint32(buf, 5)
+	buf = binary.BigEndian.AppendUint16(buf, 0xFFFF) // null client_id
+	buf = append(buf, 0)                              // tagged_fields: 0
+	buf = append(buf, bodyPayload...)
+	binary.BigEndian.PutUint32(buf, uint32(len(buf)-4))
+
+	req := ParseHeader(buf, "127.0.0.1:1234")
+	if req.ClientID != "" {
+		t.Fatalf("expected empty client_id, got %q", req.ClientID)
+	}
+	if len(req.Body) != 1 || req.Body[0] != 0x42 {
+		t.Fatalf("expected body [0x42], got %v", req.Body)
 	}
 }
