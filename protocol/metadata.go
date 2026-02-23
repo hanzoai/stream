@@ -60,9 +60,40 @@ type MetadataResponse struct {
 	Topics         []MetadataResponseTopic
 }
 
+func decodeMetadataRequest(d serde.Decoder, req *MetadataRequest, apiVersion uint16) {
+	if apiVersion >= 9 {
+		// Flexible version: compact arrays, compact strings, tagged fields
+		lenTopics := int(d.CompactArrayLen())
+		for i := 0; i < lenTopics; i++ {
+			topic := MetadataRequestTopic{
+				TopicID: d.UUID(),
+				Name:    d.CompactString(),
+			}
+			req.Topics = append(req.Topics, topic)
+			d.EndStruct() // topic tagged fields
+		}
+		req.AllowAutoTopicCreation = d.Bool()
+		req.IncludeTopicAuthorizedOperations = d.Bool()
+		// request tagged fields consumed by caller if needed
+	} else {
+		// Non-flexible: int32 array len, int16 strings, no tagged fields
+		arrayLen := int(int32(d.UInt32()))
+		if arrayLen > 0 {
+			for i := 0; i < arrayLen; i++ {
+				topic := MetadataRequestTopic{Name: string(d.String())}
+				req.Topics = append(req.Topics, topic)
+			}
+		}
+		if apiVersion >= 4 {
+			req.AllowAutoTopicCreation = d.Bool()
+		}
+	}
+}
+
 func (b *Broker) getMetadataResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	metadataRequest := decoder.Decode(&MetadataRequest{}).(*MetadataRequest)
+	metadataRequest := &MetadataRequest{}
+	decodeMetadataRequest(decoder, metadataRequest, req.RequestAPIVersion)
 	log.Debug("metadataRequest %+v", metadataRequest)
 
 	nodeID := uint32(b.Config.NodeID)
