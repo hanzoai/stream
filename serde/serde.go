@@ -438,6 +438,17 @@ func (d *Decoder) String() string {
 	return res
 }
 
+// NullableString decodes a NULLABLE_STRING (int16 length, -1 = null) from the buffer
+func (d *Decoder) NullableString() string {
+	stringLen := d.UInt16()
+	if stringLen == 0 || stringLen == 0xFFFF { // 0 = empty, 0xFFFF = null (-1 as int16)
+		return ""
+	}
+	res := string(d.b[d.Offset : d.Offset+int(stringLen)])
+	d.Offset += int(stringLen)
+	return res
+}
+
 // CompactString decodes a string with a compact format
 func (d *Decoder) CompactString() string {
 	stringLen, n := binary.Uvarint(d.b[d.Offset:])

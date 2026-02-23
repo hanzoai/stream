@@ -76,21 +76,22 @@ func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest, apiVe
 			d.EndStruct()
 		}
 	} else {
-		// Non-flexible: int16 strings, int32 arrays, int32 byte lengths
-		produceRequest.TransactionalID = string(d.String())
+		// Non-flexible: NULLABLE_STRING for transactional_id, STRING for names,
+		// INT32 for array counts and byte lengths (-1 = null for nullable fields)
+		produceRequest.TransactionalID = d.NullableString()
 		produceRequest.Acks = d.UInt16()
 		produceRequest.TimeoutMs = d.UInt32()
 		lenTopicData := int(int32(d.UInt32()))
 		for i := 0; i < lenTopicData; i++ {
-			topic := ProduceRequestTopicData{Name: string(d.String())}
+			topic := ProduceRequestTopicData{Name: d.NullableString()}
 			lenPartitionData := int(int32(d.UInt32()))
 			for j := 0; j < lenPartitionData; j++ {
 				index := d.UInt32()
-				// Records: int32 length prefix + bytes
-				recordsLen := int(int32(d.UInt32()))
+				// Records: int32 length prefix + bytes (-1 = null)
+				recordsLen := int32(d.UInt32())
 				var records []byte
 				if recordsLen > 0 {
-					records = d.GetNBytes(recordsLen)
+					records = d.GetNBytes(int(recordsLen))
 				}
 				topic.PartitionData = append(topic.PartitionData, ProduceRequestPartitionData{
 					Index: index, Records: records,
