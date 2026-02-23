@@ -135,6 +135,55 @@ func (b *Broker) getProduceResponse(req types.Request) []byte {
 		}
 		response.ProduceTopicResponses = append(response.ProduceTopicResponses, produceTopicResponse)
 	}
-	encoder := serde.NewEncoder()
-	return encoder.EncodeResponseBytes(req, response)
+	return encodeProduceResponse(req, response)
+}
+
+// encodeProduceResponse manually encodes the Produce response based on API version.
+// v0-v8: non-flexible format (int32 arrays, int16 strings, no tagged fields).
+//
+//	v7 fields: index, error_code, base_offset, log_append_time_ms, log_start_offset
+//	v8 adds: record_errors, error_message
+//
+// v9+: flexible format (compact arrays/strings, tagged field terminators).
+func encodeProduceResponse(req types.Request, response ProduceResponse) []byte {
+	e := serde.NewEncoder()
+	e.PutInt32(req.CorrelationID)
+
+	if req.RequestAPIVersion >= 9 {
+		// Flexible response header: tagged fields after correlation_id
+		e.EndStruct()
+		e.Encode(response)
+	} else {
+		// Non-flexible response: manual encoding without tagged fields
+		// topics array (int32 count)
+		e.PutArrayLen(len(response.ProduceTopicResponses))
+		for _, topic := range response.ProduceTopicResponses {
+			e.PutString(topic.Name)
+			// partitions array (int32 count)
+			e.PutArrayLen(len(topic.ProducePartitionResponses))
+			for _, p := range topic.ProducePartitionResponses {
+				e.PutInt32(p.Index)
+				e.PutInt16(p.ErrorCode)
+				e.PutInt64(p.BaseOffset)
+				if req.RequestAPIVersion >= 2 {
+					e.PutInt64(p.LogAppendTimeMs)
+				}
+				if req.RequestAPIVersion >= 5 {
+					e.PutInt64(p.LogStartOffset)
+				}
+				if req.RequestAPIVersion >= 8 {
+					// record_errors: empty array
+					e.PutArrayLen(len(p.RecordErrors))
+					// error_message: nullable string
+					e.PutNullableString(p.ErrorMessage)
+				}
+			}
+		}
+		if req.RequestAPIVersion >= 1 {
+			e.PutInt32(response.ThrottleTimeMs)
+		}
+	}
+
+	e.PutLen()
+	return e.Bytes()
 }

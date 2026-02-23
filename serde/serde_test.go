@@ -3,6 +3,8 @@ package serde
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/hanzoai/stream/types"
 )
 
 func TestParseHeader_NonFlexible(t *testing.T) {
@@ -149,6 +151,78 @@ func TestParseHeader_ApiVersionsAlwaysNonFlexible(t *testing.T) {
 	}
 	if len(req.Body) != 1 || req.Body[0] != 0xFF {
 		t.Fatalf("expected body [0xFF], got %v", req.Body)
+	}
+}
+
+func TestEncodeResponseBytes_NonFlexible(t *testing.T) {
+	// Produce v7 (non-flexible) response should NOT have tagged field terminators
+	type SimpleResponse struct {
+		ErrorCode uint16
+		Name      string
+	}
+	req := types.Request{
+		RequestAPIKey:     0, // Produce
+		RequestAPIVersion: 7, // non-flexible (threshold is v9)
+		CorrelationID:     42,
+	}
+	resp := SimpleResponse{ErrorCode: 0, Name: "test-topic"}
+	encoder := NewEncoder()
+	result := encoder.EncodeResponseBytes(req, resp)
+
+	// Parse the result: int32 length prefix + int32 correlation_id + body
+	if len(result) < 8 {
+		t.Fatalf("result too short: %d bytes", len(result))
+	}
+	totalLen := Encoding.Uint32(result[0:4])
+	if int(totalLen) != len(result)-4 {
+		t.Fatalf("length prefix mismatch: got %d, expected %d", totalLen, len(result)-4)
+	}
+	corrID := Encoding.Uint32(result[4:8])
+	if corrID != 42 {
+		t.Fatalf("correlation_id: expected 42, got %d", corrID)
+	}
+	// Next should be ErrorCode (uint16 = 0), NOT a 0x00 tagged field terminator
+	// followed by Name as int16-prefixed string (NOT compact string)
+	off := 8
+	errCode := Encoding.Uint16(result[off:])
+	off += 2
+	if errCode != 0 {
+		t.Fatalf("error_code: expected 0, got %d", errCode)
+	}
+	nameLen := Encoding.Uint16(result[off:])
+	off += 2
+	if nameLen != 10 { // "test-topic" = 10 chars
+		t.Fatalf("name length: expected 10 (int16 format), got %d", nameLen)
+	}
+	name := string(result[off : off+int(nameLen)])
+	if name != "test-topic" {
+		t.Fatalf("name: expected 'test-topic', got %q", name)
+	}
+}
+
+func TestEncodeResponseBytes_Flexible(t *testing.T) {
+	// Produce v9 (flexible) response SHOULD have tagged field terminator after correlation_id
+	type SimpleResponse struct {
+		ErrorCode uint16
+	}
+	req := types.Request{
+		RequestAPIKey:     0, // Produce
+		RequestAPIVersion: 9, // flexible
+		CorrelationID:     99,
+	}
+	resp := SimpleResponse{ErrorCode: 0}
+	encoder := NewEncoder()
+	result := encoder.EncodeResponseBytes(req, resp)
+
+	off := 4 // skip length prefix
+	corrID := Encoding.Uint32(result[off:])
+	off += 4
+	if corrID != 99 {
+		t.Fatalf("correlation_id: expected 99, got %d", corrID)
+	}
+	// Next byte should be 0x00 (tagged fields terminator for response header)
+	if result[off] != 0 {
+		t.Fatalf("expected tagged field terminator 0x00 at offset %d, got 0x%02X", off, result[off])
 	}
 }
 
