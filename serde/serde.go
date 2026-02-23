@@ -247,8 +247,10 @@ func isFlexibleRequest(apiKey, apiVersion uint16) bool {
 }
 
 // ParseHeader parses the header of a Kafka request.
-// Non-flexible (header v1): api_key(2) + api_version(2) + correlation_id(4) + client_id(int16 len + bytes)
-// Flexible (header v2): api_key(2) + api_version(2) + correlation_id(4) + client_id(uvarint compact len + bytes) + tagged_fields
+// Header v1 (non-flexible): api_key(2) + api_version(2) + correlation_id(4) + client_id(NULLABLE_STRING: int16 len + bytes)
+// Header v2 (flexible):     api_key(2) + api_version(2) + correlation_id(4) + client_id(NULLABLE_STRING: int16 len + bytes) + TAG_BUFFER
+// Note: client_id is ALWAYS int16-prefixed NULLABLE_STRING in both v1 and v2.
+// The only difference is v2 appends a TAG_BUFFER (tagged fields) after client_id.
 func ParseHeader(buffer []byte, connAddr string) types.Request {
 	apiKey := Encoding.Uint16(buffer[4:])
 	apiVersion := Encoding.Uint16(buffer[6:])
@@ -261,41 +263,28 @@ func ParseHeader(buffer []byte, connAddr string) types.Request {
 		ConnectionAddress: connAddr,
 	}
 
-	offset := 12 // past length(4) + api_key(2) + api_version(2) + correlation_id(4)
+	// client_id is always a NULLABLE_STRING (int16 length prefix) in request headers
+	clientIDLen := Encoding.Uint16(buffer[12:])
+	offset := 14
+	if clientIDLen > 0 && clientIDLen != 0xFFFF { // 0xFFFF = null
+		req.ClientID = string(buffer[offset : offset+int(clientIDLen)])
+		offset += int(clientIDLen)
+	}
 
 	if isFlexibleRequest(apiKey, apiVersion) {
-		// Flexible header v2: client_id is a compact nullable string (uvarint length)
-		clientIDLen, n := binary.Uvarint(buffer[offset:])
-		offset += n
-		if clientIDLen > 1 {
-			req.ClientID = string(buffer[offset : offset+int(clientIDLen)-1])
-			offset += int(clientIDLen) - 1
-		}
-		// else: clientIDLen 0 = null, 1 = empty string
-
-		// Skip tagged fields: uvarint count, then for each: uvarint tag + uvarint data_len + data
+		// Flexible header v2: skip TAG_BUFFER after client_id
+		// TAG_BUFFER = uvarint count, then for each: uvarint tag + uvarint data_len + data
 		if offset < len(buffer) {
 			numFields, n := binary.Uvarint(buffer[offset:])
 			offset += n
 			for i := uint64(0); i < numFields && offset < len(buffer); i++ {
-				// Skip tag (unsigned varint)
 				_, tn := binary.Uvarint(buffer[offset:])
 				offset += tn
-				// Skip data (unsigned varint length + data bytes)
 				dataLen, dn := binary.Uvarint(buffer[offset:])
 				offset += dn
 				offset += int(dataLen)
 			}
 		}
-	} else {
-		// Non-flexible header v1: client_id is a regular string (int16 length prefix)
-		clientIDLen := Encoding.Uint16(buffer[offset:])
-		offset += 2
-		if clientIDLen > 0 {
-			req.ClientID = string(buffer[offset : offset+int(clientIDLen)])
-			offset += int(clientIDLen)
-		}
-		// No tagged fields in non-flexible headers
 	}
 
 	if offset <= len(buffer) {
