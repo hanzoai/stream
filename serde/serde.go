@@ -200,18 +200,101 @@ func (e *Encoder) EndStruct() {
 	e.offset++
 }
 
+// PutArrayLen encodes a non-flexible array length as int32
+func (e *Encoder) PutArrayLen(l int) {
+	e.PutInt32(uint32(l))
+}
+
+// PutNullableString encodes a NULLABLE_STRING (int16 length prefix, -1 = null)
+func (e *Encoder) PutNullableString(s string) {
+	if s == "" {
+		e.PutInt16(0xFFFF) // null
+		return
+	}
+	e.ensureBufferSpace(2 + len(s))
+	e.PutInt16(uint16(len(s)))
+	copy(e.b[e.offset:], s)
+	e.offset += len(s)
+}
+
 // Bytes returns the encoded data as a byte slice
 func (e *Encoder) Bytes() []byte {
 	return e.b[:e.offset]
 }
 
-// EncodeResponseBytes serializes encodes the response into bytes
+// IsFlexibleResponse returns true if the given API key + version uses flexible encoding for responses.
+func IsFlexibleResponse(apiKey, apiVersion uint16) bool {
+	return isFlexibleRequest(apiKey, apiVersion)
+}
+
+// EncodeResponseBytes serializes encodes the response into bytes.
+// For flexible versions, includes tagged field terminators.
+// For non-flexible versions, uses plain encoding without tagged fields.
 func (e *Encoder) EncodeResponseBytes(req types.Request, response any) []byte {
 	e.PutInt32(req.CorrelationID)
-	e.EndStruct()
-	e.Encode(response)
+	if IsFlexibleResponse(req.RequestAPIKey, req.RequestAPIVersion) {
+		e.EndStruct() // response header tagged fields
+		e.Encode(response)
+	} else {
+		e.EncodeNonFlexible(response)
+	}
 	e.PutLen()
 	return e.Bytes()
+}
+
+// EncodeNonFlexible encodes a struct using non-flexible Kafka format:
+// int32 array counts, int16 strings, no tagged field terminators.
+func (e *Encoder) EncodeNonFlexible(x any) {
+	t := reflect.TypeOf(x)
+	v := reflect.ValueOf(x)
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		value := v.Field(i)
+		if field.Type.Kind() == reflect.Slice {
+			e.PutArrayLen(value.Len()) // int32 count
+			if field.Type.Elem().Kind() == reflect.Struct {
+				for j := 0; j < value.Len(); j++ {
+					e.EncodeNonFlexible(value.Index(j).Interface())
+				}
+			} else {
+				for j := 0; j < value.Len(); j++ {
+					e.PutNonFlexible(value.Index(j).Interface())
+				}
+			}
+		} else if field.Type.Kind() == reflect.Struct {
+			e.EncodeNonFlexible(value.Interface())
+		} else {
+			e.PutNonFlexible(value.Interface())
+		}
+	}
+	// No EndStruct — non-flexible has no tagged fields
+}
+
+// PutNonFlexible encodes a value using non-flexible format (int16 strings instead of compact)
+func (e *Encoder) PutNonFlexible(i any) {
+	switch c := i.(type) {
+	case bool:
+		e.PutBool(c)
+	case uint8:
+		e.PutInt8(c)
+	case uint16:
+		e.PutInt16(c)
+	case uint32:
+		e.PutInt32(c)
+	case uint64:
+		e.PutInt64(c)
+	case string:
+		e.PutString(c) // int16 length, not compact
+	case []byte:
+		// int32 length prefix + bytes
+		e.PutInt32(uint32(len(c)))
+		e.PutBytes(c)
+	case [16]byte:
+		e.PutBytes(c[:])
+	default:
+		log.Panic("Unknown type %T", c)
+	}
 }
 
 // FinishAndReturn finishes the encoding and returns the final byte slice

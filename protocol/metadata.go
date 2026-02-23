@@ -151,6 +151,81 @@ func (b *Broker) getMetadataResponse(req types.Request) []byte {
 		Topics:       topics,
 	}
 	log.Debug("MetadataResponse %+v", response)
-	encoder := serde.NewEncoder()
-	return encoder.EncodeResponseBytes(req, response)
+	return encodeMetadataResponse(req, response)
+}
+
+// encodeMetadataResponse manually encodes the Metadata response based on API version.
+// v0-v8: non-flexible (int32 arrays, int16 strings, no tagged fields).
+// v9+: flexible (compact arrays/strings, tagged field terminators).
+func encodeMetadataResponse(req types.Request, response MetadataResponse) []byte {
+	e := serde.NewEncoder()
+	e.PutInt32(req.CorrelationID)
+
+	if req.RequestAPIVersion >= 9 {
+		// Flexible response
+		e.EndStruct()
+		e.Encode(response)
+	} else {
+		// Non-flexible response
+		if req.RequestAPIVersion >= 3 {
+			e.PutInt32(response.ThrottleTimeMs)
+		}
+		// brokers array
+		e.PutArrayLen(len(response.Brokers))
+		for _, broker := range response.Brokers {
+			e.PutInt32(broker.NodeID)
+			e.PutString(broker.Host)
+			e.PutInt32(broker.Port)
+			if req.RequestAPIVersion >= 1 {
+				e.PutNullableString(broker.Rack)
+			}
+		}
+		if req.RequestAPIVersion >= 2 {
+			e.PutNullableString(response.ClusterID)
+		}
+		if req.RequestAPIVersion >= 1 {
+			e.PutInt32(response.ControllerID)
+		}
+		// topics array
+		e.PutArrayLen(len(response.Topics))
+		for _, topic := range response.Topics {
+			e.PutInt16(topic.ErrorCode)
+			e.PutString(topic.Name)
+			if req.RequestAPIVersion >= 1 {
+				e.PutBool(topic.IsInternal)
+			}
+			// partitions array
+			e.PutArrayLen(len(topic.Partitions))
+			for _, p := range topic.Partitions {
+				e.PutInt16(p.ErrorCode)
+				e.PutInt32(p.PartitionIndex)
+				e.PutInt32(p.LeaderID)
+				if req.RequestAPIVersion >= 7 {
+					e.PutInt32(p.LeaderEpoch)
+				}
+				// replica nodes
+				e.PutArrayLen(len(p.ReplicaNodes))
+				for _, r := range p.ReplicaNodes {
+					e.PutInt32(r)
+				}
+				// isr nodes
+				e.PutArrayLen(len(p.IsrNodes))
+				for _, r := range p.IsrNodes {
+					e.PutInt32(r)
+				}
+				if req.RequestAPIVersion >= 5 {
+					// offline replicas
+					e.PutArrayLen(len(p.OfflineReplicas))
+					for _, r := range p.OfflineReplicas {
+						e.PutInt32(r)
+					}
+				}
+			}
+			if req.RequestAPIVersion >= 8 {
+				e.PutInt32(topic.TopicAuthorizedOperations)
+			}
+		}
+	}
+	e.PutLen()
+	return e.Bytes()
 }
