@@ -24,12 +24,12 @@ func (b *Broker) getAPIVersionResponse(req types.Request) []byte {
 	response := APIVersionsResponse{
 		APIKeys: []APIKey{
 			{APIKey: produceKey, MinVersion: 0, MaxVersion: 11},
-			{APIKey: fetchKey, MinVersion: 12, MaxVersion: 12},
+			{APIKey: fetchKey, MinVersion: 0, MaxVersion: 12},
 			{APIKey: listOffsetsKey, MinVersion: 0, MaxVersion: 9},
 			{APIKey: metadataKey, MinVersion: 0, MaxVersion: 12},
 			{APIKey: offsetCommitKey, MinVersion: 0, MaxVersion: 9},
 			{APIKey: offsetFetchKey, MinVersion: 0, MaxVersion: 9},
-			{APIKey: findCoordinatorKey, MinVersion: 3, MaxVersion: 6},
+			{APIKey: findCoordinatorKey, MinVersion: 0, MaxVersion: 6},
 			{APIKey: joinGroupKey, MinVersion: 0, MaxVersion: 9},
 			{APIKey: heartbeatKey, MinVersion: 0, MaxVersion: 4},
 			{APIKey: syncGroupKey, MinVersion: 0, MaxVersion: 5},
