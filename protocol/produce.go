@@ -56,29 +56,55 @@ type RecordError struct {
 	BatchIndexErrorMessage string // compact_nullable
 }
 
-func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest) {
-	produceRequest.TransactionalID = d.CompactString()
-	produceRequest.Acks = d.UInt16()
-	produceRequest.TimeoutMs = d.UInt32()
-	lenTopicData := int(d.CompactArrayLen())
-	for i := 0; i < lenTopicData; i++ {
-		topic := ProduceRequestTopicData{Name: d.CompactString()}
-		lenPartitionData := int(d.CompactArrayLen())
-		for j := 0; j < lenPartitionData; j++ {
-			topic.PartitionData = append(topic.PartitionData, ProduceRequestPartitionData{
-				Index: d.UInt32(), Records: d.CompactBytes(),
-			})
+func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest, apiVersion uint16) {
+	if apiVersion >= 9 {
+		// Flexible version: compact strings/arrays + tagged fields
+		produceRequest.TransactionalID = d.CompactString()
+		produceRequest.Acks = d.UInt16()
+		produceRequest.TimeoutMs = d.UInt32()
+		lenTopicData := int(d.CompactArrayLen())
+		for i := 0; i < lenTopicData; i++ {
+			topic := ProduceRequestTopicData{Name: d.CompactString()}
+			lenPartitionData := int(d.CompactArrayLen())
+			for j := 0; j < lenPartitionData; j++ {
+				topic.PartitionData = append(topic.PartitionData, ProduceRequestPartitionData{
+					Index: d.UInt32(), Records: d.CompactBytes(),
+				})
+				d.EndStruct()
+			}
+			produceRequest.TopicData = append(produceRequest.TopicData, topic)
 			d.EndStruct()
 		}
-		produceRequest.TopicData = append(produceRequest.TopicData, topic)
-		d.EndStruct()
+	} else {
+		// Non-flexible: int16 strings, int32 arrays, int32 byte lengths
+		produceRequest.TransactionalID = string(d.String())
+		produceRequest.Acks = d.UInt16()
+		produceRequest.TimeoutMs = d.UInt32()
+		lenTopicData := int(int32(d.UInt32()))
+		for i := 0; i < lenTopicData; i++ {
+			topic := ProduceRequestTopicData{Name: string(d.String())}
+			lenPartitionData := int(int32(d.UInt32()))
+			for j := 0; j < lenPartitionData; j++ {
+				index := d.UInt32()
+				// Records: int32 length prefix + bytes
+				recordsLen := int(int32(d.UInt32()))
+				var records []byte
+				if recordsLen > 0 {
+					records = d.GetNBytes(recordsLen)
+				}
+				topic.PartitionData = append(topic.PartitionData, ProduceRequestPartitionData{
+					Index: index, Records: records,
+				})
+			}
+			produceRequest.TopicData = append(produceRequest.TopicData, topic)
+		}
 	}
 }
 
 func (b *Broker) getProduceResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	produceRequest := &ProduceRequest{}
-	decodeProduceRequest(decoder, produceRequest)
+	decodeProduceRequest(decoder, produceRequest, req.RequestAPIVersion)
 	log.Debug("ProduceRequest %+v", produceRequest)
 	response := ProduceResponse{}
 
