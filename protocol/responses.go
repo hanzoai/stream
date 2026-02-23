@@ -488,17 +488,13 @@ func (b *Broker) getListOffsetsResponse(req types.Request) []byte {
 		topic := ListOffsetsResponseTopic{Name: t.Name}
 		for _, p := range t.Partitions {
 			partition := ListOffsetsResponsePartition{PartitionIndex: p.PartitionIndex, LeaderEpoch: uint32(MinusOne)}
-			info, err := b.PubSub.GetStreamInfo(t.Name, p.PartitionIndex)
+			_, err := b.PubSub.GetStreamInfo(t.Name, p.PartitionIndex)
 			if err != nil {
 				partition.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
 			} else if p.Timestamp == uint64(ListOffsetsEarliestTimestamp) {
-				if info.State.Msgs > 0 && info.State.FirstSeq > 0 {
-					partition.Offset = info.State.FirstSeq - 1 // 0-based
-				}
+				partition.Offset = b.kafkaLogStartOffset(t.Name, p.PartitionIndex)
 			} else if p.Timestamp == uint64(ListOffsetsLatestTimestamp) {
-				if info.State.Msgs > 0 {
-					partition.Offset = info.State.LastSeq // next offset
-				}
+				partition.Offset = b.kafkaHighWatermark(t.Name, p.PartitionIndex)
 			} else {
 				log.Error("ListOffsetsMaxTimestamp not implemented")
 			}

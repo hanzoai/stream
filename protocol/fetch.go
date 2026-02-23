@@ -183,27 +183,23 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 			}
 
 			var recordBytes []byte
-			// Convert Kafka offset (0-based) to NATS sequence (1-based)
-			pubsubSeq := p.FetchOffset + 1
-			if pubsubSeq <= info.State.LastSeq && info.State.Msgs > 0 {
-				msg, err := b.PubSub.GetMessage(tp.Name, p.PartitionIndex, pubsubSeq)
-				if err != nil {
-					log.Error("Error fetching from PubSub seq %d: %v", pubsubSeq, err)
-				} else {
-					recordBytes = msg.Data
-					numTotalRecordBytes += len(recordBytes)
+			if info.State.Msgs > 0 {
+				// Binary search for the NATS sequence containing this Kafka offset
+				seq := b.findSequenceForOffset(tp.Name, p.PartitionIndex, p.FetchOffset)
+				if seq > 0 {
+					msg, err := b.PubSub.GetMessage(tp.Name, p.PartitionIndex, seq)
+					if err != nil {
+						log.Error("Error fetching from PubSub seq %d: %v", seq, err)
+					} else {
+						recordBytes = msg.Data
+						numTotalRecordBytes += len(recordBytes)
+					}
 				}
 			}
 
-			// Map NATS sequences to Kafka offsets
-			highWatermark := uint64(0)
-			logStartOffset := uint64(0)
-			if info.State.Msgs > 0 {
-				highWatermark = info.State.LastSeq // next offset after last
-				if info.State.FirstSeq > 0 {
-					logStartOffset = info.State.FirstSeq - 1
-				}
-			}
+			// Compute Kafka-level offsets from stored RecordBatch headers
+			highWatermark := b.kafkaHighWatermark(tp.Name, p.PartitionIndex)
+			logStartOffset := b.kafkaLogStartOffset(tp.Name, p.PartitionIndex)
 
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{

@@ -120,15 +120,30 @@ func (b *Broker) getProduceResponse(req types.Request) []byte {
 				partitionResponse.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
 				partitionResponse.ErrorMessage = ErrUnknownTopicOrPartition.Message
 			} else {
-				seq, err := b.PubSub.Publish(td.Name, pd.Index, pd.Records)
-				if err != nil {
-					log.Error("Error publishing to PubSub: %v", err)
+				mu := b.partitionLock(td.Name, pd.Index)
+				mu.Lock()
+				nextOffset, offsetErr := b.nextKafkaOffset(td.Name, pd.Index)
+				if offsetErr != nil {
+					mu.Unlock()
+					log.Error("Error computing next offset: %v", offsetErr)
 					partitionResponse.ErrorCode = uint16(ErrUnknownServerError.Code)
-					partitionResponse.ErrorMessage = err.Error()
+					partitionResponse.ErrorMessage = offsetErr.Error()
 				} else {
-					// NATS seq is 1-based, Kafka offset is 0-based
-					partitionResponse.BaseOffset = seq - 1
-					partitionResponse.LogAppendTimeMs = utils.NowAsUnixMilli()
+					// Stamp the correct Kafka base offset into the RecordBatch header.
+					// baseOffset (bytes 0-7) is NOT covered by the CRC, so this is safe.
+					if len(pd.Records) >= recordBatchHeaderMinSize {
+						SetBaseOffset(pd.Records, nextOffset)
+					}
+					_, err := b.PubSub.Publish(td.Name, pd.Index, pd.Records)
+					mu.Unlock()
+					if err != nil {
+						log.Error("Error publishing to PubSub: %v", err)
+						partitionResponse.ErrorCode = uint16(ErrUnknownServerError.Code)
+						partitionResponse.ErrorMessage = err.Error()
+					} else {
+						partitionResponse.BaseOffset = uint64(nextOffset)
+						partitionResponse.LogAppendTimeMs = utils.NowAsUnixMilli()
+					}
 				}
 			}
 			produceTopicResponse.ProducePartitionResponses = append(produceTopicResponse.ProducePartitionResponses, partitionResponse)
