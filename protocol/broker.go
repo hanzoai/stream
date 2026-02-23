@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime/debug"
 	"time"
 
 	log "github.com/hanzoai/stream/logging"
@@ -87,8 +88,13 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 		}
 		req := serde.ParseHeader(buffer, connectionAddr)
 		apiKeyHandler := b.APIDispatcher(req.RequestAPIKey)
-		log.Info("Received RequestAPIKey: %v | RequestAPIVersion: %v | CorrelationID: %v | Length: %v", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, length)
-		response := apiKeyHandler.Handler(req)
+		log.Info("Received RequestAPIKey: %v | RequestAPIVersion: %v | CorrelationID: %v | Length: %v | BodyLen: %v", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, length, len(req.Body))
+
+		response, handlerErr := b.safeHandle(apiKeyHandler, req)
+		if handlerErr != nil {
+			log.Error("Panic in handler %v (apiKey=%d, version=%d): %v", apiKeyHandler.Name, req.RequestAPIKey, req.RequestAPIVersion, handlerErr)
+			break
+		}
 
 		_, err = conn.Write(response)
 		if err != nil {
@@ -99,6 +105,16 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 		log.Trace("handleConnection Iteration took %v", d)
 	}
 	log.Debug("Connection with %s closed.", connectionAddr)
+}
+
+// safeHandle calls the API handler with panic recovery so a single bad request doesn't crash the process.
+func (b *Broker) safeHandle(h APIKeyHandler, req types.Request) (response []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v\n%s", r, debug.Stack())
+		}
+	}()
+	return h.Handler(req), nil
 }
 
 // Shutdown gracefully shuts down the broker

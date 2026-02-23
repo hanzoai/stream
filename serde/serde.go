@@ -221,55 +221,81 @@ func (e *Encoder) FinishAndReturn() []byte {
 	return e.Bytes()
 }
 
-// ParseHeader parses the header of a Kafka request
+// flexibleVersionMin maps API key to the minimum version that uses flexible encoding (KIP-482).
+// ApiVersions (18) is special: even v3+ uses the non-flexible request header format.
+var flexibleVersionMin = map[uint16]uint16{
+	0:  9,  // Produce
+	1:  12, // Fetch
+	2:  7,  // ListOffsets
+	3:  9,  // Metadata
+	8:  8,  // OffsetCommit
+	9:  8,  // OffsetFetch
+	10: 3,  // FindCoordinator
+	11: 6,  // JoinGroup
+	12: 4,  // Heartbeat
+	14: 4,  // SyncGroup
+	// 18: ApiVersions — always non-flexible request header
+	19: 5, // CreateTopics
+	22: 4, // InitProducerID
+	32: 4, // DescribeConfigs
+}
+
+// isFlexibleRequest returns true if the given API key + version uses the flexible header format.
+func isFlexibleRequest(apiKey, apiVersion uint16) bool {
+	minVer, ok := flexibleVersionMin[apiKey]
+	return ok && apiVersion >= minVer
+}
+
+// ParseHeader parses the header of a Kafka request.
+// Non-flexible (header v1): api_key(2) + api_version(2) + correlation_id(4) + client_id(int16 len + bytes)
+// Flexible (header v2): api_key(2) + api_version(2) + correlation_id(4) + client_id(uvarint compact len + bytes) + tagged_fields
 func ParseHeader(buffer []byte, connAddr string) types.Request {
-	clientIDLen := Encoding.Uint16(buffer[12:])
+	apiKey := Encoding.Uint16(buffer[4:])
+	apiVersion := Encoding.Uint16(buffer[6:])
 
 	req := types.Request{
 		Length:            Encoding.Uint32(buffer),
-		RequestAPIKey:     Encoding.Uint16(buffer[4:]),
-		RequestAPIVersion: Encoding.Uint16(buffer[6:]),
+		RequestAPIKey:     apiKey,
+		RequestAPIVersion: apiVersion,
 		CorrelationID:     Encoding.Uint32(buffer[8:]),
-		ClientID:          string(buffer[14 : 14+clientIDLen]),
 		ConnectionAddress: connAddr,
 	}
-	taggedFieldsStart := 14 + clientIDLen
 
-	if len(buffer) <= int(taggedFieldsStart) {
-		log.Error("Request header bytes don't include tagged fields, you're using an old unsupported Kafka version.")
-		return req
-	}
+	offset := 12 // past length(4) + api_key(2) + api_version(2) + correlation_id(4)
 
-	// Skip tagged fields (varint count + each field: tag varint + data compact bytes)
-	offset := int(taggedFieldsStart)
-	numFields := int(buffer[offset])
-	offset++
-	if numFields > 0 {
-		log.Debug("Skipping %d tagged field(s) in request header", numFields)
-		for i := 0; i < numFields && offset < len(buffer); i++ {
-			// Skip tag (unsigned varint)
-			for offset < len(buffer) && buffer[offset] >= 0x80 {
-				offset++
-			}
-			if offset < len(buffer) {
-				offset++ // last byte of tag varint
-			}
-			// Skip data (unsigned varint length + data bytes)
-			if offset < len(buffer) {
-				dataLen := 0
-				shift := uint(0)
-				for offset < len(buffer) {
-					b := int(buffer[offset])
-					offset++
-					dataLen |= (b & 0x7F) << shift
-					if b < 0x80 {
-						break
-					}
-					shift += 7
-				}
-				offset += dataLen
+	if isFlexibleRequest(apiKey, apiVersion) {
+		// Flexible header v2: client_id is a compact nullable string (uvarint length)
+		clientIDLen, n := binary.Uvarint(buffer[offset:])
+		offset += n
+		if clientIDLen > 1 {
+			req.ClientID = string(buffer[offset : offset+int(clientIDLen)-1])
+			offset += int(clientIDLen) - 1
+		}
+		// else: clientIDLen 0 = null, 1 = empty string
+
+		// Skip tagged fields: uvarint count, then for each: uvarint tag + uvarint data_len + data
+		if offset < len(buffer) {
+			numFields, n := binary.Uvarint(buffer[offset:])
+			offset += n
+			for i := uint64(0); i < numFields && offset < len(buffer); i++ {
+				// Skip tag (unsigned varint)
+				_, tn := binary.Uvarint(buffer[offset:])
+				offset += tn
+				// Skip data (unsigned varint length + data bytes)
+				dataLen, dn := binary.Uvarint(buffer[offset:])
+				offset += dn
+				offset += int(dataLen)
 			}
 		}
+	} else {
+		// Non-flexible header v1: client_id is a regular string (int16 length prefix)
+		clientIDLen := Encoding.Uint16(buffer[offset:])
+		offset += 2
+		if clientIDLen > 0 {
+			req.ClientID = string(buffer[offset : offset+int(clientIDLen)])
+			offset += int(clientIDLen)
+		}
+		// No tagged fields in non-flexible headers
 	}
 
 	if offset <= len(buffer) {
