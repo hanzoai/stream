@@ -12,6 +12,11 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /hanzo-stream .
 
 FROM alpine:3.20
+
+LABEL org.opencontainers.image.source="https://github.com/hanzoai/stream"
+LABEL org.opencontainers.image.description="Hanzo Stream - Kafka-compatible streaming over NATS"
+LABEL org.opencontainers.image.licenses="MIT"
+
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /hanzo-stream /usr/local/bin/hanzo-stream
 
