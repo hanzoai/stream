@@ -233,17 +233,48 @@ func ParseHeader(buffer []byte, connAddr string) types.Request {
 		ClientID:          string(buffer[14 : 14+clientIDLen]),
 		ConnectionAddress: connAddr,
 	}
-	bodyStart := 14 + clientIDLen + 1 // + 1 for empty _tagged_fields
+	taggedFieldsStart := 14 + clientIDLen
 
-	// we only support empty tagged fields
-	if len(buffer) < int(bodyStart) {
+	if len(buffer) <= int(taggedFieldsStart) {
 		log.Error("Request header bytes don't include tagged fields, you're using an old unsupported Kafka version.")
 		return req
 	}
-	if buffer[bodyStart-1] != 0 {
-		log.Panic("Request header has non empty _tagged_fields, Hanzo Kafka doesn't currently support _tagged_fields.")
+
+	// Skip tagged fields (varint count + each field: tag varint + data compact bytes)
+	offset := int(taggedFieldsStart)
+	numFields := int(buffer[offset])
+	offset++
+	if numFields > 0 {
+		log.Debug("Skipping %d tagged field(s) in request header", numFields)
+		for i := 0; i < numFields && offset < len(buffer); i++ {
+			// Skip tag (unsigned varint)
+			for offset < len(buffer) && buffer[offset] >= 0x80 {
+				offset++
+			}
+			if offset < len(buffer) {
+				offset++ // last byte of tag varint
+			}
+			// Skip data (unsigned varint length + data bytes)
+			if offset < len(buffer) {
+				dataLen := 0
+				shift := uint(0)
+				for offset < len(buffer) {
+					b := int(buffer[offset])
+					offset++
+					dataLen |= (b & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+					shift += 7
+				}
+				offset += dataLen
+			}
+		}
 	}
-	req.Body = buffer[bodyStart:]
+
+	if offset <= len(buffer) {
+		req.Body = buffer[offset:]
+	}
 	return req
 }
 
