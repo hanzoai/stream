@@ -285,9 +285,32 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 	}
 
 	// v0-v7: flat format — GroupID + Topics
-	groupID := decoder.NullableString()
+	// OffsetFetch becomes flexible at v6: compact strings/arrays + tagged fields.
+	// v0-v5: non-flexible (int16 strings, int32 array counts).
+	var groupID string
 	var topics []OffsetFetchRequestTopic
-	if req.RequestAPIVersion <= 7 {
+
+	if req.RequestAPIVersion >= 6 {
+		// v6-v7: flexible flat format
+		groupID = decoder.CompactString()
+		lenTopics := int(decoder.CompactArrayLen())
+		for i := 0; i < lenTopics; i++ {
+			name := decoder.CompactString()
+			lenParts := int(decoder.CompactArrayLen())
+			t := OffsetFetchRequestTopic{Name: name}
+			for j := 0; j < lenParts; j++ {
+				t.PartitionIndexes = append(t.PartitionIndexes, decoder.UInt32())
+			}
+			topics = append(topics, t)
+			decoder.EndStruct() // tagged fields for each topic
+		}
+		if req.RequestAPIVersion >= 7 {
+			_ = decoder.Bool() // require_stable (v7+)
+		}
+		decoder.EndStruct() // request-level tagged fields
+	} else {
+		// v0-v5: non-flexible
+		groupID = decoder.NullableString()
 		lenTopics := int(int32(decoder.UInt32()))
 		for i := 0; i < lenTopics; i++ {
 			name := decoder.NullableString()
@@ -301,30 +324,54 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 	}
 	log.Debug("offsetFetchRequest v%d group=%s topics=%+v", req.RequestAPIVersion, groupID, topics)
 
-	// Encode non-flexible response
 	e := serde.NewEncoder()
 	e.PutInt32(req.CorrelationID)
-	if req.RequestAPIVersion >= 3 {
+
+	if req.RequestAPIVersion >= 6 {
+		// v6-v7: flexible response
+		e.EndStruct() // response header tagged fields
 		e.PutInt32(0) // throttle_time_ms
-	}
-	// topics array
-	e.PutArrayLen(len(topics))
-	for _, topic := range topics {
-		e.PutString(topic.Name)
-		e.PutArrayLen(len(topic.PartitionIndexes))
-		for _, partIdx := range topic.PartitionIndexes {
-			e.PutInt32(partIdx) // partition_index
-			committedOffset, _ := b.PubSub.GetCommittedOffset(groupID, topic.Name, partIdx)
-			e.PutInt64(uint64(committedOffset))  // committed_offset
-			if req.RequestAPIVersion >= 5 {
-				e.PutInt32(uint32(MinusOne)) // committed_leader_epoch
+		// topics compact array
+		e.PutCompactArrayLen(len(topics))
+		for _, topic := range topics {
+			e.PutCompactString(topic.Name)
+			e.PutCompactArrayLen(len(topic.PartitionIndexes))
+			for _, partIdx := range topic.PartitionIndexes {
+				e.PutInt32(partIdx) // partition_index
+				committedOffset, _ := b.PubSub.GetCommittedOffset(groupID, topic.Name, partIdx)
+				e.PutInt64(uint64(committedOffset))   // committed_offset
+				e.PutInt32(uint32(MinusOne))           // committed_leader_epoch
+				e.PutCompactString("")                 // metadata
+				e.PutInt16(0)                          // error_code
+				e.EndStruct()                          // partition tagged fields
 			}
-			e.PutNullableString("")  // metadata (null)
-			e.PutInt16(0)            // error_code
+			e.EndStruct() // topic tagged fields
 		}
-	}
-	if req.RequestAPIVersion >= 2 {
-		e.PutInt16(0) // top-level error_code
+		e.PutInt16(0)     // top-level error_code
+		e.EndStruct()     // response tagged fields
+	} else {
+		// v0-v5: non-flexible response
+		if req.RequestAPIVersion >= 3 {
+			e.PutInt32(0) // throttle_time_ms
+		}
+		e.PutArrayLen(len(topics))
+		for _, topic := range topics {
+			e.PutString(topic.Name)
+			e.PutArrayLen(len(topic.PartitionIndexes))
+			for _, partIdx := range topic.PartitionIndexes {
+				e.PutInt32(partIdx) // partition_index
+				committedOffset, _ := b.PubSub.GetCommittedOffset(groupID, topic.Name, partIdx)
+				e.PutInt64(uint64(committedOffset))  // committed_offset
+				if req.RequestAPIVersion >= 5 {
+					e.PutInt32(uint32(MinusOne)) // committed_leader_epoch
+				}
+				e.PutNullableString("")  // metadata (null)
+				e.PutInt16(0)            // error_code
+			}
+		}
+		if req.RequestAPIVersion >= 2 {
+			e.PutInt16(0) // top-level error_code
+		}
 	}
 	e.PutLen()
 	return e.Bytes()

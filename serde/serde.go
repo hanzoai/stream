@@ -312,7 +312,7 @@ var flexibleVersionMin = map[uint16]uint16{
 	2:  7,  // ListOffsets
 	3:  9,  // Metadata
 	8:  8,  // OffsetCommit
-	9:  8,  // OffsetFetch
+	9:  6,  // OffsetFetch
 	10: 3,  // FindCoordinator
 	11: 6,  // JoinGroup
 	12: 4,  // Heartbeat

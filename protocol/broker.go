@@ -144,6 +144,8 @@ func (b *Broker) Startup() {
 		log.Panic("Failed to ensure offset bucket: %v", err)
 	}
 
+	b.StartAdmin()
+
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", b.Config.BrokerPort))
 	if err != nil {
 		log.Error("Error starting server: %v", err)
@@ -189,7 +191,12 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 		}
 		req := serde.ParseHeader(buffer, connectionAddr)
 		apiKeyHandler := b.APIDispatcher(req.RequestAPIKey)
-		log.Info("Received RequestAPIKey: %v | RequestAPIVersion: %v | CorrelationID: %v | Length: %v | BodyLen: %v", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, length, len(req.Body))
+		switch req.RequestAPIKey {
+		case listOffsetsKey, fetchKey, heartbeatKey:
+			log.Debug("Received %v v%d corr=%d from %s len=%d body=%d", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, connectionAddr, length, len(req.Body))
+		default:
+			log.Info("Received %v v%d corr=%d from %s len=%d body=%d", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, connectionAddr, length, len(req.Body))
+		}
 
 		response, handlerErr := b.safeHandle(apiKeyHandler, req)
 		if handlerErr != nil {
@@ -197,6 +204,7 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 			break
 		}
 
+		log.Debug("Response %v v%d corr=%d len=%d", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, len(response))
 		_, err = conn.Write(response)
 		if err != nil {
 			log.Error("Error writing to connection: %v", err)
@@ -205,7 +213,7 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 		d := time.Since(startTime)
 		log.Trace("handleConnection Iteration took %v", d)
 	}
-	log.Debug("Connection with %s closed.", connectionAddr)
+	log.Info("Connection with %s closed.", connectionAddr)
 }
 
 // safeHandle calls the API handler with panic recovery so a single bad request doesn't crash the process.
