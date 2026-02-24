@@ -15,6 +15,7 @@ var config = types.Configuration{
 	PubSubUrl:      "nats://localhost:4222",
 	BrokerHost:     "localhost",
 	BrokerPort:     9092,
+	AdminPort:      9093,
 	NodeID:         1,
 	StreamReplicas: 1,
 	StorageType:    "file",
@@ -26,7 +27,7 @@ func main() {
 		Short: "Hanzo Stream — Kafka wire protocol gateway for Hanzo PubSub",
 		Run: func(cmd *cobra.Command, args []string) {
 			broker := protocol.NewBroker(&config)
-			log.SetLogLevel(log.DEBUG)
+			log.SetLogLevel(log.INFO)
 
 			// Handle termination signals (e.g., Ctrl+C)
 			signalChannel := make(chan os.Signal, 1)
@@ -46,6 +47,7 @@ func main() {
 	rootCmd.Flags().StringVar(&config.PubSubUrl, "pubsub-url", "nats://localhost:4222", "Hanzo PubSub server URL")
 	rootCmd.Flags().StringVar(&config.PubSubCredFile, "pubsub-creds", "", "Hanzo PubSub credentials file")
 	rootCmd.Flags().IntVar(&config.BrokerPort, "port", 9092, "Kafka listener port")
+	rootCmd.Flags().IntVar(&config.AdminPort, "admin-port", 9093, "Admin HTTP port (0 to disable)")
 	rootCmd.Flags().StringVar(&config.BrokerHost, "host", "localhost", "Advertised hostname")
 	rootCmd.Flags().IntVar(&config.NodeID, "node-id", 1, "Broker node ID")
 	rootCmd.Flags().IntVar(&config.StreamReplicas, "replicas", 1, "Hanzo Stream replica count")

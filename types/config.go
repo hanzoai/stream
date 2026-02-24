@@ -14,6 +14,9 @@ type Configuration struct {
 	StreamReplicas int    // Number of replicas for Hanzo Stream (default 1)
 	StorageType    string // "file" or "memory" (default "file")
 
+	// Admin HTTP server
+	AdminPort int // HTTP admin/monitoring port (default 9093, 0 to disable)
+
 	// Broker identity
 	NodeID int
 }

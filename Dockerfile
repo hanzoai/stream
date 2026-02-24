@@ -20,7 +20,7 @@ LABEL org.opencontainers.image.licenses="MIT"
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /hanzo-stream /usr/local/bin/hanzo-stream
 
-EXPOSE 9092
+EXPOSE 9092 9093
 
 ENTRYPOINT ["hanzo-stream"]
 CMD ["--pubsub-url", "nats://pubsub:4222", "--host", "0.0.0.0"]

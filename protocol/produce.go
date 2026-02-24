@@ -115,6 +115,15 @@ func (b *Broker) getProduceResponse(req types.Request) []byte {
 			partitionResponse := ProducePartitionResponse{
 				Index: pd.Index,
 			}
+			// Debug: log first bytes of incoming RecordBatch
+			if len(pd.Records) > 0 {
+				hexLen := len(pd.Records)
+				if hexLen > 80 {
+					hexLen = 80
+				}
+				log.Info("Produce RecordBatch %s/%d len=%d first_bytes=%x",
+					td.Name, pd.Index, len(pd.Records), pd.Records[:hexLen])
+			}
 			_, err := b.PubSub.GetStreamInfo(td.Name, pd.Index)
 			if err != nil {
 				partitionResponse.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)

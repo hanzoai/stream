@@ -13,9 +13,11 @@ func StreamName(topic string, partition uint32) string {
 	return fmt.Sprintf("kafka-%s-%d", topic, partition)
 }
 
-// SubjectName returns the PubSub subject for a topic+partition
+// SubjectName returns the PubSub subject for a topic+partition.
+// Must match the subject pattern configured on the JetStream stream:
+// StreamName(topic, partition) + ".data"
 func SubjectName(topic string, partition uint32) string {
-	return fmt.Sprintf("kafka.%s.%d", topic, partition)
+	return fmt.Sprintf("%s.data", StreamName(topic, partition))
 }
 
 // ParseStreamName extracts topic and partition from a stream name

@@ -182,6 +182,10 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 				goto FINISH
 			}
 
+			// Compute Kafka-level offsets from stored RecordBatch headers
+			highWatermark := b.kafkaHighWatermark(tp.Name, p.PartitionIndex)
+			logStartOffset := b.kafkaLogStartOffset(tp.Name, p.PartitionIndex)
+
 			var recordBytes []byte
 			if info.State.Msgs > 0 {
 				// Binary search for the NATS sequence containing this Kafka offset
@@ -193,19 +197,20 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 					} else {
 						recordBytes = msg.Data
 						numTotalRecordBytes += len(recordBytes)
+						log.Debug("Fetched %s/%d offset=%d seq=%d data_len=%d", tp.Name, p.PartitionIndex, p.FetchOffset, seq, len(recordBytes))
 					}
+				} else {
+					log.Debug("Fetch skip %s/%d: offset=%d not found in range", tp.Name, p.PartitionIndex, p.FetchOffset)
 				}
+			} else {
+				log.Debug("Fetch skip %s/%d: no messages", tp.Name, p.PartitionIndex)
 			}
-
-			// Compute Kafka-level offsets from stored RecordBatch headers
-			highWatermark := b.kafkaHighWatermark(tp.Name, p.PartitionIndex)
-			logStartOffset := b.kafkaLogStartOffset(tp.Name, p.PartitionIndex)
 
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{
 					PartitionIndex:       p.PartitionIndex,
 					HighWatermark:        highWatermark,
-					LastStableOffset:     uint64(MinusOne),
+					LastStableOffset:     highWatermark,
 					LogStartOffset:       logStartOffset,
 					PreferredReadReplica: uint32(MinusOne), // -1 = no preferred replica
 					Records:              recordBytes,
@@ -214,7 +219,7 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 		response.Responses = append(response.Responses, fetchTopicResponse)
 	}
 	if numTotalRecordBytes == 0 {
-		log.Info("No data available for this fetch, waiting briefly")
+		log.Debug("No data available for this fetch, waiting briefly")
 		time.Sleep(300 * time.Millisecond)
 	}
 FINISH:

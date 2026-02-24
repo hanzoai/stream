@@ -30,8 +30,14 @@ func offsetKey(group, topic string, partition uint32) string {
 	return fmt.Sprintf("%s.%s.%d", group, topic, partition)
 }
 
-// CommitOffset stores the committed offset for a consumer group
+// CommitOffset stores the committed offset for a consumer group.
+// Rejects obviously invalid offsets (negative or absurdly large).
 func (c *Client) CommitOffset(group, topic string, partition uint32, offset int64) error {
+	// Reject garbage offsets — valid Kafka offsets are non-negative and reasonable
+	if offset < 0 || offset > 1<<50 {
+		log.Warn("Rejecting invalid offset commit: group=%s topic=%s partition=%d offset=%d", group, topic, partition, offset)
+		return fmt.Errorf("invalid offset: %d", offset)
+	}
 	kv, err := c.JS.KeyValue(offsetBucketName)
 	if err != nil {
 		return err
@@ -40,7 +46,8 @@ func (c *Client) CommitOffset(group, topic string, partition uint32, offset int6
 	return err
 }
 
-// GetCommittedOffset returns the committed offset, or -1 if none
+// GetCommittedOffset returns the committed offset, or -1 if none.
+// If a corrupted (absurdly large) offset is found, it is purged and -1 is returned.
 func (c *Client) GetCommittedOffset(group, topic string, partition uint32) (int64, error) {
 	kv, err := c.JS.KeyValue(offsetBucketName)
 	if err != nil {
@@ -54,5 +61,28 @@ func (c *Client) GetCommittedOffset(group, topic string, partition uint32) (int6
 	if err != nil {
 		return -1, err
 	}
+	// Detect and purge corrupted offsets
+	if offset < 0 || offset > 1<<50 {
+		log.Warn("Purging corrupted offset: group=%s topic=%s partition=%d offset=%d", group, topic, partition, offset)
+		_ = kv.Delete(offsetKey(group, topic, partition))
+		return -1, nil
+	}
 	return offset, nil
+}
+
+// PurgeAllOffsets deletes all committed offsets from the KV store
+func (c *Client) PurgeAllOffsets() error {
+	kv, err := c.JS.KeyValue(offsetBucketName)
+	if err != nil {
+		return err
+	}
+	keys, err := kv.Keys()
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		log.Info("Purging offset key: %s", key)
+		_ = kv.Delete(key)
+	}
+	return nil
 }
