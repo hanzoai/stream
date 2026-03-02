@@ -1,0 +1,29 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+hanzo-stream
+
+# Test artifacts
+*.test
+*.out
+*.prof
+coverage.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+
+# AI assistant config
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+QWEN.md
