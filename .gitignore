@@ -5,6 +5,7 @@
 *.so
 *.dylib
 hanzo-stream
+hanzo-stream-*
 
 # Test artifacts
 *.test
