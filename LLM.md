@@ -83,11 +83,24 @@ kafka-console-producer.sh --bootstrap-server localhost:9092 --topic test
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test --from-beginning
 ```
 
+## Admin HTTP API (port 9093)
+
+All management endpoints under `/v1/stream/`:
+```
+GET /v1/stream/status  — service status (JSON)
+GET /v1/stream/topics  — list topics with partition details
+GET /v1/stream/groups  — list consumer group offsets
+GET /healthz           — health check (K8s probes)
+```
+
+Root `/` redirects to `/v1/stream/`.
+
 ## Deployment (hanzo-k8s, do-sfo3)
 ```
 Namespace: hanzo
 PubSub:    pubsub.hanzo.svc:4222   (nats:2.10-alpine, 1 replica, 20Gi PVC)
 Stream:    stream.hanzo.svc:9092   (ghcr.io/hanzoai/stream:latest, 2 replicas)
+Admin:     :9093 (HTTP, /healthz for K8s probes)
 ```
 Dockerfile builds linux/amd64 via `GOARCH=amd64`. CI pushes to GHCR on every main push.
 
