@@ -46,17 +46,23 @@ type GroupOffset struct {
 	Offset    int64  `json:"offset"`
 }
 
-// StartAdmin starts the admin HTTP server on the configured port
+// StartAdmin starts the admin HTTP server on the configured port.
+// All management endpoints are served under /v1/stream/.
+// /healthz is served at root for K8s probes.
 func (b *Broker) StartAdmin() {
 	if b.Config.AdminPort == 0 {
 		return
 	}
 
+	const prefix = "/v1/stream"
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/status", b.handleStatus)
-	mux.HandleFunc("/topics", b.handleTopics)
-	mux.HandleFunc("/groups", b.handleGroups)
-	mux.HandleFunc("/", b.handleIndex)
+	mux.HandleFunc(prefix+"/status", b.handleStatus)
+	mux.HandleFunc(prefix+"/topics", b.handleTopics)
+	mux.HandleFunc(prefix+"/groups", b.handleGroups)
+	mux.HandleFunc("/healthz", b.handleHealthz)
+	mux.HandleFunc(prefix+"/", b.handleIndex)
+	mux.HandleFunc("/", b.handleRoot)
 
 	addr := fmt.Sprintf(":%d", b.Config.AdminPort)
 	log.Info("Admin HTTP server listening on %s", addr)
@@ -67,16 +73,31 @@ func (b *Broker) StartAdmin() {
 	}()
 }
 
-func (b *Broker) handleIndex(w http.ResponseWriter, r *http.Request) {
+func (b *Broker) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
+	http.Redirect(w, r, "/v1/stream/", http.StatusMovedPermanently)
+}
+
+func (b *Broker) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprintf(w, "Hanzo Stream Admin\n\n")
-	fmt.Fprintf(w, "GET /status  — service health\n")
-	fmt.Fprintf(w, "GET /topics  — list topics with partition details\n")
-	fmt.Fprintf(w, "GET /groups  — list consumer group offsets\n")
+	fmt.Fprintf(w, "GET /v1/stream/status  — service status\n")
+	fmt.Fprintf(w, "GET /v1/stream/topics  — list topics with partition details\n")
+	fmt.Fprintf(w, "GET /v1/stream/groups  — list consumer group offsets\n")
+	fmt.Fprintf(w, "GET /healthz           — health check\n")
+}
+
+func (b *Broker) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	if b.PubSub != nil && b.PubSub.NC != nil && b.PubSub.NC.IsConnected() {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "ok\n")
+		return
+	}
+	w.WriteHeader(http.StatusServiceUnavailable)
+	fmt.Fprintf(w, "pubsub disconnected\n")
 }
 
 func (b *Broker) handleStatus(w http.ResponseWriter, r *http.Request) {
