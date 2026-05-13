@@ -1,6 +1,6 @@
 module github.com/hanzoai/stream
 
-go 1.26.1
+go 1.26.3
 
 require (
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3
