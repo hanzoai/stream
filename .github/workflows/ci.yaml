@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   lint-and-vet:
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [self-hosted, linux, amd64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -29,7 +29,7 @@ jobs:
           version: latest
 
   integration-test:
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [self-hosted, linux, amd64]
     needs: lint-and-vet
     continue-on-error: true
     env:
