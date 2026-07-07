@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -20,6 +19,7 @@ type Broker struct {
 	Config         *types.Configuration
 	PubSub         *pubsub.Client
 	ShutDownSignal chan bool
+	listener       net.Listener
 	partitionMu    sync.Map // map[string]*sync.Mutex keyed by "topic-partition"
 }
 
@@ -130,36 +130,52 @@ func NewBroker(config *types.Configuration) *Broker {
 	}
 }
 
-// Startup initializes the broker, connects to NATS, and listens for incoming Kafka client connections
+// Startup initializes the broker and blocks serving Kafka clients. It is the
+// standalone entrypoint (main.go): any startup failure is fatal.
 func (b *Broker) Startup() {
+	if err := b.Serve(); err != nil {
+		log.Panic("Hanzo Kafka failed: %v", err)
+	}
+}
+
+// Serve is the embed-safe form of Startup: it connects to PubSub, starts the
+// admin server, and runs the Kafka accept loop, RETURNING errors instead of
+// exiting the process so a host binary (hanzoai/cloud) can run the adaptor
+// in-process. It stores the listener so Shutdown can stop it; a clean Shutdown
+// closes ShutDownSignal + the listener, so Accept fails and Serve returns nil.
+// Run it in a goroutine when embedding.
+func (b *Broker) Serve() error {
 	var err error
 
 	b.PubSub, err = pubsub.NewClient(b.Config.PubSubUrl)
 	if err != nil {
-		log.Panic("Failed to connect to Hanzo PubSub: %v", err)
+		return fmt.Errorf("connect pubsub: %w", err)
 	}
 
-	err = b.PubSub.EnsureOffsetBucket()
-	if err != nil {
-		log.Panic("Failed to ensure offset bucket: %v", err)
+	if err = b.PubSub.EnsureOffsetBucket(); err != nil {
+		return fmt.Errorf("ensure offset bucket: %w", err)
 	}
 
 	b.StartAdmin()
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", b.Config.BrokerPort))
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", b.Config.BrokerPort))
 	if err != nil {
-		log.Error("Error starting server: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("listen :%d: %w", b.Config.BrokerPort, err)
 	}
-	defer listener.Close()
+	b.listener = ln
 
 	log.Info("Hanzo Kafka listening on port %d (PubSub: %s)", b.Config.BrokerPort, b.Config.PubSubUrl)
 
 	for {
-		conn, err := listener.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
-			log.Error("Error accepting connection: %v", err)
-			continue
+			select {
+			case <-b.ShutDownSignal:
+				return nil
+			default:
+				log.Error("Error accepting connection: %v", err)
+				continue
+			}
 		}
 		go b.HandleConnection(conn)
 	}
@@ -229,6 +245,9 @@ func (b *Broker) safeHandle(h APIKeyHandler, req types.Request) (response []byte
 // Shutdown gracefully shuts down the broker
 func (b *Broker) Shutdown() {
 	close(b.ShutDownSignal)
+	if b.listener != nil {
+		b.listener.Close()
+	}
 	if b.PubSub != nil {
 		b.PubSub.Close()
 	}
