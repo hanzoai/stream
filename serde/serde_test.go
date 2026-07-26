@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/hanzoai/stream/types"
+	"github.com/hanzoai/kafka/types"
 )
 
 func TestParseHeader_NonFlexible(t *testing.T) {

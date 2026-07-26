@@ -10,8 +10,8 @@ type Configuration struct {
 	BrokerHost string `kafka:"CompactString"`
 	BrokerPort int
 
-	// Hanzo Stream defaults
-	StreamReplicas int    // Number of replicas for Hanzo Stream (default 1)
+	// Hanzo Kafka defaults
+	StreamReplicas int    // Number of replicas for Hanzo Kafka (default 1)
 	StorageType    string // "file" or "memory" (default "file")
 
 	// Admin HTTP server

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	log "github.com/hanzoai/stream/logging"
+	log "github.com/hanzoai/kafka/logging"
 	"github.com/nats-io/nats.go"
 )
 

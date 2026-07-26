@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanzoai/stream/logging"
-	broker "github.com/hanzoai/stream/protocol"
-	"github.com/hanzoai/stream/types"
+	"github.com/hanzoai/kafka/logging"
+	broker "github.com/hanzoai/kafka/protocol"
+	"github.com/hanzoai/kafka/types"
 )
 
 var TestConfig = types.Configuration{

@@ -3,7 +3,7 @@ package compress
 import (
 	"sync"
 
-	log "github.com/hanzoai/stream/logging"
+	log "github.com/hanzoai/kafka/logging"
 	"github.com/klauspost/compress/zstd"
 )
 

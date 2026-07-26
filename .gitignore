@@ -4,8 +4,8 @@
 *.dll
 *.so
 *.dylib
-hanzo-stream
-hanzo-stream-*
+hanzo-kafka
+hanzo-kafka-*
 
 # Test artifacts
 *.test
