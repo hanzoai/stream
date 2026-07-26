@@ -5,9 +5,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	log "github.com/hanzoai/stream/logging"
-	"github.com/hanzoai/stream/protocol"
-	"github.com/hanzoai/stream/types"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/protocol"
+	"github.com/hanzoai/kafka/types"
 	"github.com/spf13/cobra"
 )
 
@@ -23,8 +23,8 @@ var config = types.Configuration{
 
 func main() {
 	var rootCmd = &cobra.Command{
-		Use:   "hanzo-stream",
-		Short: "Hanzo Stream — Kafka wire protocol gateway for Hanzo PubSub",
+		Use:   "hanzo-kafka",
+		Short: "Hanzo Kafka — Kafka wire protocol gateway for Hanzo PubSub",
 		Run: func(cmd *cobra.Command, args []string) {
 			broker := protocol.NewBroker(&config)
 			log.SetLogLevel(log.INFO)
@@ -50,8 +50,8 @@ func main() {
 	rootCmd.Flags().IntVar(&config.AdminPort, "admin-port", 9093, "Admin HTTP port (0 to disable)")
 	rootCmd.Flags().StringVar(&config.BrokerHost, "host", "localhost", "Advertised hostname")
 	rootCmd.Flags().IntVar(&config.NodeID, "node-id", 1, "Broker node ID")
-	rootCmd.Flags().IntVar(&config.StreamReplicas, "replicas", 1, "Hanzo Stream replica count")
-	rootCmd.Flags().StringVar(&config.StorageType, "storage", "file", "Hanzo Stream storage type: file or memory")
+	rootCmd.Flags().IntVar(&config.StreamReplicas, "replicas", 1, "Hanzo Kafka replica count")
+	rootCmd.Flags().StringVar(&config.StorageType, "storage", "file", "Hanzo Kafka storage type: file or memory")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Panic("Failed to execute root command %v", err)

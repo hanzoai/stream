@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	log "github.com/hanzoai/stream/logging"
+	log "github.com/hanzoai/kafka/logging"
 	"github.com/nats-io/nats.go"
 )
 
-// StreamName returns the Hanzo Stream name for a topic+partition
+// StreamName returns the Hanzo Kafka name for a topic+partition
 func StreamName(topic string, partition uint32) string {
 	return fmt.Sprintf("kafka-%s-%d", topic, partition)
 }
@@ -35,7 +35,7 @@ func ParseStreamName(name string) (topic string, partition uint32, ok bool) {
 	return topic, partition, err == nil
 }
 
-// CreateTopicStreams creates N Hanzo Stream streams for a topic (one per partition)
+// CreateTopicStreams creates N Hanzo Kafka streams for a topic (one per partition)
 func (c *Client) CreateTopicStreams(topic string, numPartitions uint32, replicas int, storage nats.StorageType) error {
 	if replicas < 1 {
 		replicas = 1
@@ -75,7 +75,7 @@ func (c *Client) GetTopicPartitionCount(topic string) (uint32, error) {
 	return count, nil
 }
 
-// GetStreamInfo returns Hanzo Stream info for a topic+partition
+// GetStreamInfo returns Hanzo Kafka info for a topic+partition
 func (c *Client) GetStreamInfo(topic string, partition uint32) (*nats.StreamInfo, error) {
 	return c.JS.StreamInfo(StreamName(topic, partition))
 }

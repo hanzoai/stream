@@ -3,17 +3,17 @@ package pubsub
 import (
 	"fmt"
 
-	log "github.com/hanzoai/stream/logging"
+	log "github.com/hanzoai/kafka/logging"
 	"github.com/nats-io/nats.go"
 )
 
-// Client wraps Hanzo PubSub connection and Hanzo Stream context
+// Client wraps Hanzo PubSub connection and Hanzo Kafka context
 type Client struct {
 	NC *nats.Conn
 	JS nats.JetStreamContext
 }
 
-// NewClient connects to Hanzo PubSub and obtains Hanzo Stream context
+// NewClient connects to Hanzo PubSub and obtains Hanzo Kafka context
 func NewClient(url string, opts ...nats.Option) (*Client, error) {
 	nc, err := nats.Connect(url, opts...)
 	if err != nil {
@@ -22,7 +22,7 @@ func NewClient(url string, opts ...nats.Option) (*Client, error) {
 	js, err := nc.JetStream()
 	if err != nil {
 		nc.Close()
-		return nil, fmt.Errorf("failed to get Hanzo Stream context: %w", err)
+		return nil, fmt.Errorf("failed to get Hanzo Kafka context: %w", err)
 	}
 	log.Info("Connected to Hanzo PubSub at %s", url)
 	return &Client{NC: nc, JS: js}, nil

@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	log "github.com/hanzoai/stream/logging"
-	"github.com/hanzoai/stream/pubsub"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/pubsub"
 )
 
 // AdminStatus is the response for GET /status
@@ -83,7 +83,7 @@ func (b *Broker) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "Hanzo Stream Admin\n\n")
+	fmt.Fprintf(w, "Hanzo Kafka Admin\n\n")
 	fmt.Fprintf(w, "GET /v1/stream/status  — service status\n")
 	fmt.Fprintf(w, "GET /v1/stream/topics  — list topics with partition details\n")
 	fmt.Fprintf(w, "GET /v1/stream/groups  — list consumer group offsets\n")
@@ -106,7 +106,7 @@ func (b *Broker) handleStatus(w http.ResponseWriter, r *http.Request) {
 		connStatus = "connected"
 	}
 	writeJSON(w, AdminStatus{
-		Service:    "hanzo-stream",
+		Service:    "hanzo-kafka",
 		KafkaPort:  b.Config.BrokerPort,
 		AdminPort:  b.Config.AdminPort,
 		PubSubURL:  b.Config.PubSubUrl,

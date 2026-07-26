@@ -48,7 +48,7 @@ jobs:
           curl -sL https://github.com/nats-io/nats-server/releases/download/v2.10.24/nats-server-v2.10.24-linux-amd64.tar.gz | tar xz
           sudo mv nats-server-v2.10.24-linux-amd64/nats-server /usr/local/bin/
 
-      - name: Start PubSub with Hanzo Stream
+      - name: Start PubSub with Hanzo Kafka
         run: |
           nats-server --jetstream --store_dir /tmp/pubsub-data &
           sleep 2
@@ -80,5 +80,5 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     uses: hanzoai/.github/.github/workflows/docker-build.yml@main
     with:
-      image: ghcr.io/hanzoai/stream
+      image: ghcr.io/hanzoai/kafka
     secrets: inherit
