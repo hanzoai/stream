@@ -1,6 +1,6 @@
 <p align="center"><img src=".github/hero.svg" alt="stream" width="880"></p>
 
-# Hanzo Stream
+# Hanzo Kafka
 
 Kafka wire protocol adapter for Hanzo PubSub (NATS JetStream). Accepts standard Kafka clients and translates requests to NATS underneath, allowing any Kafka producer/consumer to work against Hanzo infrastructure without code changes.
 

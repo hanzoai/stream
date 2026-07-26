@@ -1,11 +1,11 @@
-# Hanzo Stream — LLM.md
+# Hanzo Kafka — LLM.md
 
 ## Overview
-Hanzo Stream is a stateless Kafka wire protocol gateway that translates Kafka client requests to Hanzo Stream (JetStream) operations against Hanzo PubSub. Standard Kafka clients connect on `:9092`; all storage and replication is delegated to Hanzo PubSub.
+Hanzo Kafka is a stateless Kafka wire protocol gateway that translates Kafka client requests to Hanzo Kafka (JetStream) operations against Hanzo PubSub. Standard Kafka clients connect on `:9092`; all storage and replication is delegated to Hanzo PubSub.
 
 ## Architecture
 ```
-Kafka Client → TCP :9092 → Hanzo Stream (protocol translation) → Hanzo PubSub
+Kafka Client → TCP :9092 → Hanzo Kafka (protocol translation) → Hanzo PubSub
 ```
 
 **Stateless gateway**: All state lives in Hanzo PubSub. Multiple instances can share the same PubSub cluster.
@@ -30,7 +30,7 @@ Fetch:   msg = GetMsg(offset + 1)
 
 ## Module Structure
 ```
-github.com/hanzoai/stream
+github.com/hanzoai/kafka
 ├── main.go              # CLI entry point (cobra)
 ├── pubsub/              # Hanzo PubSub client wrapper
 │   ├── client.go        # Connection + stream context
@@ -74,7 +74,7 @@ github.com/hanzoai/stream
 # Start Hanzo PubSub
 nats-server --jetstream
 
-# Start Hanzo Stream
+# Start Hanzo Kafka
 go run main.go --pubsub-url nats://localhost:4222 --port 9092
 
 # Use standard Kafka CLI tools
@@ -99,7 +99,7 @@ Root `/` redirects to `/v1/stream/`.
 ```
 Namespace: hanzo
 PubSub:    pubsub.hanzo.svc:4222   (nats:2.10-alpine, 1 replica, 20Gi PVC)
-Stream:    stream.hanzo.svc:9092   (ghcr.io/hanzoai/stream:latest, 2 replicas)
+Kafka:     kafka.hanzo.svc:9092   (ghcr.io/hanzoai/kafka:latest, 2 replicas)
 Admin:     :9093 (HTTP, /healthz for K8s probes)
 ```
 Dockerfile builds linux/amd64 via `GOARCH=amd64`. CI pushes to GHCR on every main push.

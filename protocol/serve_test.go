@@ -3,7 +3,7 @@ package protocol
 import (
 	"testing"
 
-	"github.com/hanzoai/stream/types"
+	"github.com/hanzoai/kafka/types"
 )
 
 // TestServeReturnsErrorOnUnreachablePubSub proves the embed-safety property: on

@@ -3,9 +3,9 @@ package protocol
 import (
 	"time"
 
-	log "github.com/hanzoai/stream/logging"
-	"github.com/hanzoai/stream/serde"
-	"github.com/hanzoai/stream/types"
+	log "github.com/hanzoai/kafka/logging"
+	"github.com/hanzoai/kafka/serde"
+	"github.com/hanzoai/kafka/types"
 )
 
 // FetchRequest represents the details of a FetchRequest (Version: 12).

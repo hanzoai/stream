@@ -14,18 +14,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /hanzo-stream .
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /hanzo-kafka .
 
 FROM alpine:3.20
 
-LABEL org.opencontainers.image.source="https://github.com/hanzoai/stream"
-LABEL org.opencontainers.image.description="Hanzo Stream - Kafka-compatible streaming over NATS"
+LABEL org.opencontainers.image.source="https://github.com/hanzoai/kafka"
+LABEL org.opencontainers.image.description="Hanzo Kafka - Kafka-compatible streaming over NATS"
 LABEL org.opencontainers.image.licenses="MIT"
 
 RUN apk add --no-cache ca-certificates
-COPY --from=builder /hanzo-stream /usr/local/bin/hanzo-stream
+COPY --from=builder /hanzo-kafka /usr/local/bin/hanzo-kafka
 
 EXPOSE 9092 9093
 
-ENTRYPOINT ["hanzo-stream"]
+ENTRYPOINT ["hanzo-kafka"]
 CMD ["--pubsub-url", "nats://pubsub:4222", "--host", "0.0.0.0"]
