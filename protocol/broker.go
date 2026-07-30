@@ -14,6 +14,9 @@ import (
 	"github.com/hanzoai/kafka/types"
 )
 
+// maxRequestSize bounds a single Kafka request frame (128 MiB).
+const maxRequestSize = 128 << 20
+
 // Broker represents a Hanzo Kafka broker instance
 type Broker struct {
 	Config         *types.Configuration
@@ -21,6 +24,7 @@ type Broker struct {
 	ShutDownSignal chan bool
 	listener       net.Listener
 	partitionMu    sync.Map // map[string]*sync.Mutex keyed by "topic-partition"
+	readHints      sync.Map // map[string]readHint keyed by "topic-partition"
 }
 
 // partitionLock returns a mutex for a topic+partition, ensuring safe concurrent offset assignment.
@@ -30,96 +34,170 @@ func (b *Broker) partitionLock(topic string, partition uint32) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
-// nextKafkaOffset computes the next Kafka record offset for a partition by reading
-// the last stored RecordBatch header. Must be called while holding the partition lock.
-func (b *Broker) nextKafkaOffset(topic string, partition uint32) (int64, error) {
+// Log positions on a partition are read from the stored RecordBatch headers,
+// never derived from PubSub sequences: Hanzo PubSub sequences are only
+// monotonic, not dense (the production store allocates from a sparse e18
+// space, and deletes leave holes), so sequence arithmetic addresses nothing.
+// Messages that do not walk as valid batch chains are skipped everywhere —
+// the stream subject is reachable by any PubSub client, and one raw publish
+// served verbatim poisons every consumer that fetches it (the 2026-07
+// insights outage: unfetchable records until the stream was purged).
+
+// boundsScanLimit caps how many stored messages a poison-recovery scan will
+// read before treating the partition as empty. Valid batches are found in one
+// read; only a partition whose edges are wall-to-wall foreign messages pays
+// more, and unbounded reads on the fetch path would let one bad stream stall
+// the broker.
+const boundsScanLimit = 10000
+
+// partitionBounds derives the Kafka log bounds: logStart is the first offset
+// of the first valid record set, next is one past the last offset of the last
+// valid one (the high watermark, and the offset produce stamps next).
+func (b *Broker) partitionBounds(topic string, partition uint32) (logStart, next int64, err error) {
 	info, err := b.PubSub.GetStreamInfo(topic, partition)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if info.State.Msgs == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
-	lastMsg, err := b.PubSub.GetMessage(topic, partition, info.State.LastSeq)
-	if err != nil {
-		return 0, fmt.Errorf("read last message seq %d: %w", info.State.LastSeq, err)
+
+	// Head: first valid record set at or after FirstSeq.
+	seq := info.State.FirstSeq
+	var first *int64
+	for i := 0; i < boundsScanLimit; i++ {
+		msg, err := b.PubSub.NextMessage(topic, partition, seq)
+		if err != nil || msg == nil {
+			break
+		}
+		if f, _, ok := batchSpan(msg.Data); ok {
+			first = &f
+			break
+		}
+		seq = msg.Sequence + 1
 	}
-	header, err := ParseRecordBatchHeader(lastMsg.Data)
-	if err != nil {
-		return 0, fmt.Errorf("parse last record batch: %w", err)
+	if first == nil {
+		return 0, 0, nil // nothing but foreign messages: an empty log
 	}
-	return header.BaseOffset + header.OffsetCount(), nil
+
+	// Tail: the last stored message is addressable directly. If it is foreign,
+	// fall back to a bounded forward scan for the last valid record set.
+	if msg, err := b.PubSub.GetMessage(topic, partition, info.State.LastSeq); err == nil {
+		if _, last, ok := batchSpan(msg.Data); ok {
+			return *first, last + 1, nil
+		}
+	}
+	log.Warn("partition %s/%d tail is not a record batch; scanning", topic, partition)
+	next = *first
+	seq = info.State.FirstSeq
+	for i := 0; i < boundsScanLimit; i++ {
+		msg, err := b.PubSub.NextMessage(topic, partition, seq)
+		if err != nil || msg == nil {
+			break
+		}
+		if _, last, ok := batchSpan(msg.Data); ok {
+			next = last + 1
+		}
+		seq = msg.Sequence + 1
+	}
+	return *first, next, nil
 }
 
-// kafkaHighWatermark returns the next Kafka offset after the last stored record.
-func (b *Broker) kafkaHighWatermark(topic string, partition uint32) uint64 {
-	info, err := b.PubSub.GetStreamInfo(topic, partition)
-	if err != nil || info.State.Msgs == 0 {
-		return 0
-	}
-	lastMsg, err := b.PubSub.GetMessage(topic, partition, info.State.LastSeq)
-	if err != nil {
-		return 0
-	}
-	header, err := ParseRecordBatchHeader(lastMsg.Data)
-	if err != nil {
-		return 0
-	}
-	return uint64(header.BaseOffset + header.OffsetCount())
+// readHint remembers, per partition, where the last served fetch left off, so
+// a sequential consumer costs one addressed read per fetch instead of a
+// search.
+type readHint struct {
+	offset int64  // next Kafka offset the consumer will ask for
+	seq    uint64 // first sequence that can hold it
 }
 
-// kafkaLogStartOffset returns the Kafka offset of the first stored record.
-func (b *Broker) kafkaLogStartOffset(topic string, partition uint32) uint64 {
+// findRecordSet returns the stored record set whose span contains offset, or
+// the first valid one past it (sequence holes and skipped foreign messages
+// leave gaps in the offset space). Returns nil when nothing at or past offset
+// exists. Callers have already bounds-checked offset, so nil means the data
+// the bounds promised could not be read — serve empty and let the client
+// retry, never serve bytes that did not walk.
+func (b *Broker) findRecordSet(topic string, partition uint32, offset int64) *pubsub.StoredMsg {
 	info, err := b.PubSub.GetStreamInfo(topic, partition)
 	if err != nil || info.State.Msgs == 0 {
-		return 0
-	}
-	firstMsg, err := b.PubSub.GetMessage(topic, partition, info.State.FirstSeq)
-	if err != nil {
-		return 0
-	}
-	header, err := ParseRecordBatchHeader(firstMsg.Data)
-	if err != nil {
-		return 0
-	}
-	return uint64(header.BaseOffset)
-}
-
-// findSequenceForOffset uses binary search to find the NATS sequence
-// containing the given Kafka offset. Returns 0 if not found.
-func (b *Broker) findSequenceForOffset(topic string, partition uint32, offset uint64) uint64 {
-	info, err := b.PubSub.GetStreamInfo(topic, partition)
-	if err != nil || info.State.Msgs == 0 {
-		return 0
+		return nil
 	}
 
-	lo := info.State.FirstSeq
-	hi := info.State.LastSeq
+	key := fmt.Sprintf("%s-%d", topic, partition)
+	if v, ok := b.readHints.Load(key); ok {
+		h := v.(readHint)
+		if h.offset == offset {
+			if msg := b.probeFrom(topic, partition, h.seq, offset); msg != nil {
+				b.rememberHint(key, offset, msg)
+				return msg
+			}
+		}
+	}
 
+	// Binary search over the sequence space. A probe at mid returns the first
+	// stored valid record set at or after mid together with its real sequence,
+	// so sparse sequences and holes still halve the interval each round.
+	lo, hi := info.State.FirstSeq, info.State.LastSeq
 	for lo <= hi {
 		mid := lo + (hi-lo)/2
-		msg, err := b.PubSub.GetMessage(topic, partition, mid)
-		if err != nil {
-			return 0
-		}
-		header, err := ParseRecordBatchHeader(msg.Data)
-		if err != nil {
-			return 0
-		}
-
-		batchStart := uint64(header.BaseOffset)
-		batchEnd := batchStart + uint64(header.LastOffsetDelta)
-
-		if offset < batchStart {
+		msg := b.probeFrom(topic, partition, mid, 0)
+		if msg == nil {
+			// Nothing valid at or after mid: the target, if any, is below.
+			if mid == 0 {
+				break
+			}
 			hi = mid - 1
-		} else if offset > batchEnd {
-			lo = mid + 1
-		} else {
-			return mid
+			continue
+		}
+		f, l, _ := batchSpan(msg.Data)
+		switch {
+		case offset >= f && offset <= l:
+			b.rememberHint(key, offset, msg)
+			return msg
+		case offset < f:
+			if msg.Sequence <= lo {
+				// Everything from lo on starts past offset: this is the first
+				// record set after the gap that swallowed it.
+				b.rememberHint(key, offset, msg)
+				return msg
+			}
+			hi = min(mid-1, msg.Sequence-1)
+		default: // offset > l
+			lo = msg.Sequence + 1
 		}
 	}
+	return nil
+}
 
-	return 0
+// probeFrom returns the first valid record set at or after seq, skipping up to
+// boundsScanLimit foreign messages. wantOffset is a fast-path hint: when the
+// exact sequence holds the batch (the dense steady state), one direct read
+// answers without a subscription.
+func (b *Broker) probeFrom(topic string, partition uint32, seq uint64, wantOffset int64) *pubsub.StoredMsg {
+	if raw, err := b.PubSub.GetMessage(topic, partition, seq); err == nil {
+		if f, l, ok := batchSpan(raw.Data); ok && (wantOffset == 0 || (wantOffset >= f && wantOffset <= l)) {
+			return &pubsub.StoredMsg{Sequence: seq, Data: raw.Data}
+		}
+	}
+	for i := 0; i < boundsScanLimit; i++ {
+		msg, err := b.PubSub.NextMessage(topic, partition, seq)
+		if err != nil || msg == nil {
+			return nil
+		}
+		if _, _, ok := batchSpan(msg.Data); ok {
+			return msg
+		}
+		seq = msg.Sequence + 1
+	}
+	return nil
+}
+
+func (b *Broker) rememberHint(key string, offset int64, msg *pubsub.StoredMsg) {
+	_, last, ok := batchSpan(msg.Data)
+	if !ok {
+		return
+	}
+	b.readHints.Store(key, readHint{offset: last + 1, seq: msg.Sequence + 1})
 }
 
 // NewBroker creates a new Broker instance with the provided configuration
@@ -196,6 +274,13 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 			return
 		}
 		length := serde.Encoding.Uint32(lengthBuffer)
+		if length > maxRequestSize {
+			// A framed length this large is not Kafka — it is a stray protocol
+			// (an HTTP probe reads as a ~1GB frame) or garbage. Allocating it
+			// would let any port scan OOM the broker.
+			log.Error("request frame of %d bytes from %s exceeds %d; closing", length, connectionAddr, maxRequestSize)
+			return
+		}
 		buffer := make([]byte, length+4)
 		copy(buffer, lengthBuffer)
 		_, err = io.ReadFull(conn, buffer[4:])

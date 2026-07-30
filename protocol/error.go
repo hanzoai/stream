@@ -54,6 +54,7 @@ var (
 	ErrInvalidReplicaAssignment     = Error{Code: 39, Message: "Replica assignment is invalid.", IsRetriable: false}
 	ErrInvalidConfig                = Error{Code: 40, Message: "Configuration is invalid.", IsRetriable: false}
 	ErrNotController                = Error{Code: 41, Message: "This is not the correct controller for this cluster.", IsRetriable: true}
+	ErrInvalidRecord                = Error{Code: 87, Message: "This record has failed the validation on broker and hence will be rejected.", IsRetriable: false}
 )
 
 // ErrorMap associates error codes with corresponding Error structs
@@ -100,4 +101,5 @@ var ErrorMap = map[int16]Error{
 	38: ErrInvalidReplicationFactor,
 	39: ErrInvalidReplicaAssignment,
 	40: ErrInvalidConfig,
+	87: ErrInvalidRecord,
 }

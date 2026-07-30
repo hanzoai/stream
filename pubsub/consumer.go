@@ -30,13 +30,14 @@ func offsetKey(group, topic string, partition uint32) string {
 	return fmt.Sprintf("%s.%s.%d", group, topic, partition)
 }
 
-// CommitOffset stores the committed offset for a consumer group.
-// Rejects obviously invalid offsets (negative or absurdly large).
+// CommitOffset durably stores the committed offset for a consumer group.
+// Any non-negative int64 is a valid offset: offsets are stamped from the
+// partition's own log positions, which on Hanzo PubSub live in a sparse space
+// that reaches e18. A magnitude ceiling ("reject absurdly large") once lived
+// here and rejected every real commit — offsets are opaque, never plausible.
 func (c *Client) CommitOffset(group, topic string, partition uint32, offset int64) error {
-	// Reject garbage offsets — valid Kafka offsets are non-negative and reasonable
-	if offset < 0 || offset > 1<<50 {
-		log.Warn("Rejecting invalid offset commit: group=%s topic=%s partition=%d offset=%d", group, topic, partition, offset)
-		return fmt.Errorf("invalid offset: %d", offset)
+	if offset < 0 {
+		return fmt.Errorf("negative offset: %d", offset)
 	}
 	kv, err := c.JS.KeyValue(offsetBucketName)
 	if err != nil {
@@ -47,7 +48,6 @@ func (c *Client) CommitOffset(group, topic string, partition uint32, offset int6
 }
 
 // GetCommittedOffset returns the committed offset, or -1 if none.
-// If a corrupted (absurdly large) offset is found, it is purged and -1 is returned.
 func (c *Client) GetCommittedOffset(group, topic string, partition uint32) (int64, error) {
 	kv, err := c.JS.KeyValue(offsetBucketName)
 	if err != nil {
@@ -58,13 +58,7 @@ func (c *Client) GetCommittedOffset(group, topic string, partition uint32) (int6
 		return -1, nil
 	}
 	offset, err := strconv.ParseInt(string(entry.Value()), 10, 64)
-	if err != nil {
-		return -1, err
-	}
-	// Detect and purge corrupted offsets
-	if offset < 0 || offset > 1<<50 {
-		log.Warn("Purging corrupted offset: group=%s topic=%s partition=%d offset=%d", group, topic, partition, offset)
-		_ = kv.Delete(offsetKey(group, topic, partition))
+	if err != nil || offset < 0 {
 		return -1, nil
 	}
 	return offset, nil

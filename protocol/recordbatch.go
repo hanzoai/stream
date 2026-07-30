@@ -31,6 +31,13 @@ type RecordBatchHeader struct {
 
 const recordBatchHeaderMinSize = 61
 
+// recordBatchMagic is the only batch format this gateway stores or serves.
+const recordBatchMagic = 2
+
+// batchPrefix is the number of bytes batchLength does not count:
+// baseOffset (8) + batchLength itself (4).
+const batchPrefix = 12
+
 // ParseRecordBatchHeader extracts header fields from raw RecordBatch bytes.
 func ParseRecordBatchHeader(data []byte) (RecordBatchHeader, error) {
 	if len(data) < recordBatchHeaderMinSize {
@@ -54,4 +61,74 @@ func SetBaseOffset(data []byte, baseOffset int64) {
 // OffsetCount returns the number of Kafka offsets consumed by this batch.
 func (h RecordBatchHeader) OffsetCount() int64 {
 	return int64(h.LastOffsetDelta) + 1
+}
+
+// Size returns the batch's total wire size (batchLength counts from the
+// partitionLeaderEpoch field, so the 12-byte prefix is added back).
+func (h RecordBatchHeader) Size() int {
+	return batchPrefix + int(h.BatchLength)
+}
+
+// batchAt is a parsed batch header plus its byte position in a record set.
+type batchAt struct {
+	At     int
+	Header RecordBatchHeader
+}
+
+// walkBatches parses the RecordBatch chain covering data, succeeding only when
+// the chain is well-formed: every batch has magic v2 and a sane length, and
+// the last one ends exactly at len(data). Anything else is not a record set
+// this broker will store or serve — a raw publish onto a kafka-* subject, a
+// truncated write, corruption. One such message served verbatim poisons every
+// consumer that fetches it (the client reads its garbage bytes as a batch
+// length), so this walk is the single gate both produce and fetch trust.
+func walkBatches(data []byte) ([]batchAt, bool) {
+	var out []batchAt
+	at := 0
+	for at < len(data) {
+		rest := data[at:]
+		if len(rest) < recordBatchHeaderMinSize || rest[16] != recordBatchMagic {
+			return nil, false
+		}
+		h, err := ParseRecordBatchHeader(rest)
+		if err != nil {
+			return nil, false
+		}
+		if h.BatchLength < recordBatchHeaderMinSize-batchPrefix ||
+			h.LastOffsetDelta < 0 || h.RecordCount < 1 ||
+			at+h.Size() > len(data) {
+			return nil, false
+		}
+		out = append(out, batchAt{At: at, Header: h})
+		at += h.Size()
+	}
+	return out, len(out) > 0
+}
+
+// stampBaseOffsets rewrites every batch's baseOffset so the chain occupies
+// Kafka offsets [base, base+n). Returns n, or ok=false if data is not a valid
+// batch chain (in which case nothing is modified).
+func stampBaseOffsets(data []byte, base int64) (int64, bool) {
+	batches, ok := walkBatches(data)
+	if !ok {
+		return 0, false
+	}
+	n := int64(0)
+	for _, b := range batches {
+		SetBaseOffset(data[b.At:], base+n)
+		n += b.Header.OffsetCount()
+	}
+	return n, true
+}
+
+// batchSpan reports the Kafka offsets [first, last] covered by a stored record
+// set, ok=false if the data does not walk as a valid chain.
+func batchSpan(data []byte) (first, last int64, ok bool) {
+	batches, ok := walkBatches(data)
+	if !ok {
+		return 0, 0, false
+	}
+	h0 := batches[0].Header
+	hn := batches[len(batches)-1].Header
+	return h0.BaseOffset, hn.BaseOffset + int64(hn.LastOffsetDelta), true
 }

@@ -176,45 +176,36 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 	for _, tp := range fetchRequest.Topics {
 		fetchTopicResponse := FetchTopicResponse{TopicName: tp.Name}
 		for _, p := range tp.Partitions {
-			info, err := b.PubSub.GetStreamInfo(tp.Name, p.PartitionIndex)
+			pr := FetchPartitionResponse{
+				PartitionIndex:       p.PartitionIndex,
+				PreferredReadReplica: uint32(MinusOne), // -1 = no preferred replica
+			}
+			logStart, hw, err := b.partitionBounds(tp.Name, p.PartitionIndex)
 			if err != nil {
-				response.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
-				goto FINISH
-			}
-
-			// Compute Kafka-level offsets from stored RecordBatch headers
-			highWatermark := b.kafkaHighWatermark(tp.Name, p.PartitionIndex)
-			logStartOffset := b.kafkaLogStartOffset(tp.Name, p.PartitionIndex)
-
-			var recordBytes []byte
-			if info.State.Msgs > 0 {
-				// Binary search for the NATS sequence containing this Kafka offset
-				seq := b.findSequenceForOffset(tp.Name, p.PartitionIndex, p.FetchOffset)
-				if seq > 0 {
-					msg, err := b.PubSub.GetMessage(tp.Name, p.PartitionIndex, seq)
-					if err != nil {
-						log.Error("Error fetching from PubSub seq %d: %v", seq, err)
-					} else {
-						recordBytes = msg.Data
-						numTotalRecordBytes += len(recordBytes)
-						log.Debug("Fetched %s/%d offset=%d seq=%d data_len=%d", tp.Name, p.PartitionIndex, p.FetchOffset, seq, len(recordBytes))
-					}
-				} else {
-					log.Debug("Fetch skip %s/%d: offset=%d not found in range", tp.Name, p.PartitionIndex, p.FetchOffset)
-				}
+				pr.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
 			} else {
-				log.Debug("Fetch skip %s/%d: no messages", tp.Name, p.PartitionIndex)
+				pr.HighWatermark = uint64(hw)
+				pr.LastStableOffset = uint64(hw)
+				pr.LogStartOffset = uint64(logStart)
+				offset := int64(p.FetchOffset)
+				switch {
+				case offset < logStart || offset > hw:
+					// Out of range is an answer, not a stall: the client resets
+					// per its auto.offset.reset policy. Serving empty here
+					// instead (the old behavior) left consumers polling a dead
+					// position forever whenever their committed offset stopped
+					// existing (purge, retention, an operator reset).
+					pr.ErrorCode = uint16(ErrOffsetOutOfRange.Code)
+				case offset == hw:
+					// caught up: empty records, no error
+				default:
+					if msg := b.findRecordSet(tp.Name, p.PartitionIndex, offset); msg != nil {
+						pr.Records = msg.Data
+						numTotalRecordBytes += len(msg.Data)
+					}
+				}
 			}
-
-			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
-				FetchPartitionResponse{
-					PartitionIndex:       p.PartitionIndex,
-					HighWatermark:        highWatermark,
-					LastStableOffset:     highWatermark,
-					LogStartOffset:       logStartOffset,
-					PreferredReadReplica: uint32(MinusOne), // -1 = no preferred replica
-					Records:              recordBytes,
-				})
+			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions, pr)
 		}
 		response.Responses = append(response.Responses, fetchTopicResponse)
 	}
@@ -222,7 +213,6 @@ func (b *Broker) getFetchResponse(req types.Request) []byte {
 		log.Debug("No data available for this fetch, waiting briefly")
 		time.Sleep(300 * time.Millisecond)
 	}
-FINISH:
 	return encodeFetchResponse(req, response)
 }
 

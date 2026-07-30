@@ -127,14 +127,14 @@ func encodeJoinGroupResponse(req types.Request, jgr *JoinGroupRequest, protocolN
 		if req.RequestAPIVersion >= 2 {
 			e.PutInt32(0) // throttle_time_ms
 		}
-		e.PutInt16(0)                  // error_code
-		e.PutInt32(1)                  // generation_id
-		e.PutString(protocolName)      // protocol_name (v7+ adds protocol_type before this)
-		e.PutString(jgr.MemberID)      // leader
-		e.PutString(jgr.MemberID)      // member_id
+		e.PutInt16(0)             // error_code
+		e.PutInt32(1)             // generation_id
+		e.PutString(protocolName) // protocol_name (v7+ adds protocol_type before this)
+		e.PutString(jgr.MemberID) // leader
+		e.PutString(jgr.MemberID) // member_id
 		// members array
 		e.PutArrayLen(1)
-		e.PutString(jgr.MemberID)              // member_id
+		e.PutString(jgr.MemberID) // member_id
 		if req.RequestAPIVersion >= 5 {
 			e.PutNullableString(jgr.GroupInstanceID) // group_instance_id
 		}
@@ -156,10 +156,10 @@ func (b *Broker) getHeartbeatResponse(req types.Request) []byte {
 	e := serde.NewEncoder()
 	e.PutInt32(req.CorrelationID)
 	if req.RequestAPIVersion >= 4 {
-		e.EndStruct()                // response header tagged fields
-		e.PutInt32(0)                // throttle_time_ms
-		e.PutInt16(0)                // error_code
-		e.EndStruct()                // response tagged fields
+		e.EndStruct() // response header tagged fields
+		e.PutInt32(0) // throttle_time_ms
+		e.PutInt16(0) // error_code
+		e.EndStruct() // response tagged fields
 	} else {
 		e.PutInt32(0) // throttle_time_ms
 		e.PutInt16(0) // error_code
@@ -235,7 +235,7 @@ func (b *Broker) getSyncGroupResponse(req types.Request) []byte {
 			e.PutCompactString(syncGroupRequest.ProtocolName) // protocol_name (v5+)
 		}
 		e.PutCompactBytes(assignmentBytes) // assignment
-		e.EndStruct()                       // response tagged fields
+		e.EndStruct()                      // response tagged fields
 	} else {
 		// Non-flexible (v0-v3)
 		if req.RequestAPIVersion >= 1 {
@@ -259,8 +259,30 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 
 	if req.RequestAPIVersion >= 8 {
-		// v8+: batched groups format (flexible)
-		offsetFetchRequest := decoder.Decode(&OffsetFetchRequest{}).(*OffsetFetchRequest)
+		// v8+: batched groups format (flexible). Decoded by hand because the
+		// member_id/member_epoch fields exist only from v9 — a version-blind
+		// struct decode misparses every v8 request.
+		offsetFetchRequest := &OffsetFetchRequest{}
+		lenGroups := int(decoder.CompactArrayLen())
+		for i := 0; i < lenGroups; i++ {
+			g := OffsetFetchRequestGroup{GroupID: decoder.CompactString()}
+			if req.RequestAPIVersion >= 9 {
+				g.MemberID = decoder.CompactString()
+				g.MemberEpoch = decoder.UInt32()
+			}
+			lenTopics := int(decoder.CompactArrayLen())
+			for j := 0; j < lenTopics; j++ {
+				t := OffsetFetchRequestTopic{Name: decoder.CompactString()}
+				lenParts := int(decoder.CompactArrayLen())
+				for k := 0; k < lenParts; k++ {
+					t.PartitionIndexes = append(t.PartitionIndexes, decoder.UInt32())
+				}
+				g.Topics = append(g.Topics, t)
+				decoder.EndStruct()
+			}
+			offsetFetchRequest.Groups = append(offsetFetchRequest.Groups, g)
+			decoder.EndStruct()
+		}
 		log.Debug("offsetFetchRequest %+v", offsetFetchRequest)
 
 		response := OffsetFetchResponse{}
@@ -271,8 +293,9 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 				for _, partitionIndex := range topic.PartitionIndexes {
 					committedOffset, _ := b.PubSub.GetCommittedOffset(group.GroupID, topic.Name, partitionIndex)
 					t.Partitions = append(t.Partitions, OffsetFetchPartition{
-						PartitionIndex:  partitionIndex,
-						CommittedOffset: uint64(committedOffset),
+						PartitionIndex:       partitionIndex,
+						CommittedOffset:      uint64(committedOffset),
+						CommittedLeaderEpoch: uint32(MinusOne),
 					})
 				}
 				g.Topics = append(g.Topics, t)
@@ -339,16 +362,16 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 			for _, partIdx := range topic.PartitionIndexes {
 				e.PutInt32(partIdx) // partition_index
 				committedOffset, _ := b.PubSub.GetCommittedOffset(groupID, topic.Name, partIdx)
-				e.PutInt64(uint64(committedOffset))   // committed_offset
-				e.PutInt32(uint32(MinusOne))           // committed_leader_epoch
-				e.PutCompactString("")                 // metadata
-				e.PutInt16(0)                          // error_code
-				e.EndStruct()                          // partition tagged fields
+				e.PutInt64(uint64(committedOffset)) // committed_offset
+				e.PutInt32(uint32(MinusOne))        // committed_leader_epoch
+				e.PutCompactString("")              // metadata
+				e.PutInt16(0)                       // error_code
+				e.EndStruct()                       // partition tagged fields
 			}
 			e.EndStruct() // topic tagged fields
 		}
-		e.PutInt16(0)     // top-level error_code
-		e.EndStruct()     // response tagged fields
+		e.PutInt16(0) // top-level error_code
+		e.EndStruct() // response tagged fields
 	} else {
 		// v0-v5: non-flexible response
 		if req.RequestAPIVersion >= 3 {
@@ -361,12 +384,12 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 			for _, partIdx := range topic.PartitionIndexes {
 				e.PutInt32(partIdx) // partition_index
 				committedOffset, _ := b.PubSub.GetCommittedOffset(groupID, topic.Name, partIdx)
-				e.PutInt64(uint64(committedOffset))  // committed_offset
+				e.PutInt64(uint64(committedOffset)) // committed_offset
 				if req.RequestAPIVersion >= 5 {
 					e.PutInt32(uint32(MinusOne)) // committed_leader_epoch
 				}
-				e.PutNullableString("")  // metadata (null)
-				e.PutInt16(0)            // error_code
+				e.PutNullableString("") // metadata (null)
+				e.PutInt16(0)           // error_code
 			}
 		}
 		if req.RequestAPIVersion >= 2 {
@@ -468,8 +491,8 @@ func (b *Broker) getOffsetCommitResponse(req types.Request) []byte {
 				log.Error("Error committing offset: %v", err)
 				errCode = uint16(ErrUnknownServerError.Code)
 			}
-			e.PutInt32(p.idx)    // partition_index
-			e.PutInt16(errCode)  // error_code
+			e.PutInt32(p.idx)   // partition_index
+			e.PutInt16(errCode) // error_code
 		}
 	}
 	e.PutLen()
@@ -535,13 +558,13 @@ func (b *Broker) getListOffsetsResponse(req types.Request) []byte {
 		topic := ListOffsetsResponseTopic{Name: t.Name}
 		for _, p := range t.Partitions {
 			partition := ListOffsetsResponsePartition{PartitionIndex: p.PartitionIndex, LeaderEpoch: uint32(MinusOne)}
-			_, err := b.PubSub.GetStreamInfo(t.Name, p.PartitionIndex)
+			logStart, hw, err := b.partitionBounds(t.Name, p.PartitionIndex)
 			if err != nil {
 				partition.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
 			} else if p.Timestamp == uint64(ListOffsetsEarliestTimestamp) {
-				partition.Offset = b.kafkaLogStartOffset(t.Name, p.PartitionIndex)
+				partition.Offset = uint64(logStart)
 			} else if p.Timestamp == uint64(ListOffsetsLatestTimestamp) {
-				partition.Offset = b.kafkaHighWatermark(t.Name, p.PartitionIndex)
+				partition.Offset = uint64(hw)
 			} else {
 				log.Error("ListOffsetsMaxTimestamp not implemented")
 			}

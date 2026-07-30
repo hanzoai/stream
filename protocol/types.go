@@ -123,7 +123,6 @@ type OffsetFetchGroup struct {
 type OffsetFetchTopic struct {
 	Name       string
 	Partitions []OffsetFetchPartition
-	ErrorCode  uint16
 }
 
 // OffsetFetchPartition represents a partition in an offset fetch response.

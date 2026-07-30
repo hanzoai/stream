@@ -3,6 +3,7 @@ package pubsub
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	log "github.com/hanzoai/kafka/logging"
 	"github.com/nats-io/nats.go"
@@ -92,6 +93,40 @@ func (c *Client) Publish(topic string, partition uint32, data []byte) (uint64, e
 // GetMessage retrieves a message by stream sequence number
 func (c *Client) GetMessage(topic string, partition uint32, sequence uint64) (*nats.RawStreamMsg, error) {
 	return c.JS.GetMsg(StreamName(topic, partition), sequence)
+}
+
+// StoredMsg is a stored partition message with its stream sequence.
+type StoredMsg struct {
+	Sequence uint64
+	Data     []byte
+}
+
+// NextMessage returns the first stored message with sequence >= seq, or nil if
+// the partition holds none at or past it. This — not sequence arithmetic — is
+// the primitive for reading a partition: Hanzo PubSub assigns sequences that
+// are only guaranteed monotonic, not dense (deletes leave holes and the
+// production store allocates from a sparse space), so "seq+1" addresses
+// nothing. An ephemeral by-start-sequence subscription asks the stream itself
+// for the next real message.
+func (c *Client) NextMessage(topic string, partition uint32, seq uint64) (*StoredMsg, error) {
+	if seq < 1 {
+		seq = 1
+	}
+	sub, err := c.JS.SubscribeSync(SubjectName(topic, partition),
+		nats.StartSequence(seq), nats.AckNone(), nats.MaxDeliver(1))
+	if err != nil {
+		return nil, err
+	}
+	defer sub.Unsubscribe()
+	msg, err := sub.NextMsg(500 * time.Millisecond)
+	if err != nil {
+		return nil, nil // nothing at or past seq
+	}
+	meta, err := msg.Metadata()
+	if err != nil {
+		return nil, err
+	}
+	return &StoredMsg{Sequence: meta.Sequence.Stream, Data: msg.Data}, nil
 }
 
 // ListTopics returns all unique topic names from kafka-* streams

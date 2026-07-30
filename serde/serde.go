@@ -26,13 +26,18 @@ func NewEncoder() Encoder {
 	return Encoder{b: make([]byte, BufferIncrement)}
 }
 
-// ensureBufferSpace ensures the buffer has enough space to accommodate the new data
+// ensureBufferSpace grows the buffer to fit off more bytes. It must grow to
+// the requested size, not by one increment: a single record batch can exceed
+// any fixed step, and Go's copy() silently truncates at the shorter slice —
+// an under-grown buffer here turns into a corrupt response with no error.
 func (e *Encoder) ensureBufferSpace(off int) {
-	if off+e.offset > len(e.b) {
-		newBuffer := make([]byte, len(e.b)+BufferIncrement)
-		copy(newBuffer, e.b)
-		e.b = newBuffer
+	need := e.offset + off
+	if need <= len(e.b) {
+		return
 	}
+	newBuffer := make([]byte, need+BufferIncrement)
+	copy(newBuffer, e.b)
+	e.b = newBuffer
 }
 
 // Encode encodes a struct using reflection

@@ -115,15 +115,6 @@ func (b *Broker) getProduceResponse(req types.Request) []byte {
 			partitionResponse := ProducePartitionResponse{
 				Index: pd.Index,
 			}
-			// Debug: log first bytes of incoming RecordBatch
-			if len(pd.Records) > 0 {
-				hexLen := len(pd.Records)
-				if hexLen > 80 {
-					hexLen = 80
-				}
-				log.Info("Produce RecordBatch %s/%d len=%d first_bytes=%x",
-					td.Name, pd.Index, len(pd.Records), pd.Records[:hexLen])
-			}
 			_, err := b.PubSub.GetStreamInfo(td.Name, pd.Index)
 			if err != nil {
 				partitionResponse.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
@@ -131,18 +122,19 @@ func (b *Broker) getProduceResponse(req types.Request) []byte {
 			} else {
 				mu := b.partitionLock(td.Name, pd.Index)
 				mu.Lock()
-				nextOffset, offsetErr := b.nextKafkaOffset(td.Name, pd.Index)
+				_, nextOffset, offsetErr := b.partitionBounds(td.Name, pd.Index)
 				if offsetErr != nil {
 					mu.Unlock()
 					log.Error("Error computing next offset: %v", offsetErr)
 					partitionResponse.ErrorCode = uint16(ErrUnknownServerError.Code)
 					partitionResponse.ErrorMessage = offsetErr.Error()
+				} else if _, ok := stampBaseOffsets(pd.Records, nextOffset); !ok {
+					// Not a valid RecordBatch chain. Storing it would poison the
+					// partition for every consumer, so it is refused at the door.
+					mu.Unlock()
+					partitionResponse.ErrorCode = uint16(ErrInvalidRecord.Code)
+					partitionResponse.ErrorMessage = ErrInvalidRecord.Message
 				} else {
-					// Stamp the correct Kafka base offset into the RecordBatch header.
-					// baseOffset (bytes 0-7) is NOT covered by the CRC, so this is safe.
-					if len(pd.Records) >= recordBatchHeaderMinSize {
-						SetBaseOffset(pd.Records, nextOffset)
-					}
 					_, err := b.PubSub.Publish(td.Name, pd.Index, pd.Records)
 					mu.Unlock()
 					if err != nil {
