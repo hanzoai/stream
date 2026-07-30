@@ -20,13 +20,33 @@ Kafka Client → TCP :9092 → Hanzo Kafka (protocol translation) → Hanzo PubS
 | Create topic (N parts) | N calls to `AddStream()` |
 | Metadata | `StreamInfo()` per partition stream |
 
-## Critical: Offset Translation
-```
-Kafka offset 0  ↔  PubSub sequence 1
-Kafka offset N  ↔  PubSub sequence N+1
-Produce: seq = Publish(); return seq - 1
-Fetch:   msg = GetMsg(offset + 1)
-```
+## Critical: Offset Model
+Kafka offsets are STAMPED into each stored RecordBatch header at produce time
+(baseOffset, outside the CRC'd region) and read back from those headers —
+never derived from PubSub sequences. Hanzo PubSub sequences are only
+monotonic, not dense (the production store allocates from a sparse e18 space;
+deletes leave holes), so sequence arithmetic is meaningless.
+
+- Produce: next offset = last valid batch's baseOffset + record count; the
+  incoming chain is validated (`walkBatches`) and refused with INVALID_RECORD
+  if malformed — foreign bytes on a partition subject can otherwise poison
+  every consumer.
+- Fetch: `findRecordSet` binary-searches the sequence space using
+  by-start-sequence probes, skipping stored messages that are not valid
+  batches; out-of-range offsets answer OFFSET_OUT_OF_RANGE so clients reset.
+- Watermarks: `partitionBounds` walks the stream edges for the first/last
+  valid batch.
+- Consumer groups: committed offsets live in KV bucket
+  `kafka-consumer-offsets` (`group.topic.partition` keys) — the durable state;
+  the gateway itself is stateless and restartable. Any non-negative int64 is a
+  valid offset. OffsetFetch with a null topics array enumerates the bucket.
+
+## Tests
+`go test ./...` — `test/e2e` runs a REAL Kafka client (franz-go) against the
+broker over an in-process `hanzoai/pubsub/embed`, covering compression
+round-trips, sequence holes, poison messages, e18 offsets, out-of-range
+reset, broker-restart group resume, >1MiB records, and two gateways sharing
+one store.
 
 ## Module Structure
 ```

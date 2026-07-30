@@ -85,8 +85,8 @@ func encodeFindCoordinatorResponse(req types.Request, key string, nodeID int, ho
 			e.Encode(response)
 		} else {
 			// v3: flat response but flexible encoding
-			e.PutInt32(0) // throttle_time_ms
-			e.PutInt16(0) // error_code
+			e.PutInt32(0)          // throttle_time_ms
+			e.PutInt16(0)          // error_code
 			e.PutCompactString("") // error_message (nullable)
 			e.PutInt32(uint32(nodeID))
 			e.PutCompactString(host)

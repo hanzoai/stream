@@ -321,6 +321,7 @@ var flexibleVersionMin = map[uint16]uint16{
 	10: 3,  // FindCoordinator
 	11: 6,  // JoinGroup
 	12: 4,  // Heartbeat
+	13: 4,  // LeaveGroup
 	14: 4,  // SyncGroup
 	// 18: ApiVersions — always non-flexible request header
 	19: 5, // CreateTopics

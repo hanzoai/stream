@@ -25,6 +25,7 @@ type Broker struct {
 	listener       net.Listener
 	partitionMu    sync.Map // map[string]*sync.Mutex keyed by "topic-partition"
 	readHints      sync.Map // map[string]readHint keyed by "topic-partition"
+	shutdownOnce   sync.Once
 }
 
 // partitionLock returns a mutex for a topic+partition, ensuring safe concurrent offset assignment.
@@ -241,6 +242,11 @@ func (b *Broker) Serve() error {
 		return fmt.Errorf("listen :%d: %w", b.Config.BrokerPort, err)
 	}
 	b.listener = ln
+	// Port 0 asked the kernel to pick: publish the real port so Metadata and
+	// FindCoordinator advertise an address clients can actually dial.
+	if b.Config.BrokerPort == 0 {
+		b.Config.BrokerPort = ln.Addr().(*net.TCPAddr).Port
+	}
 
 	log.Info("Hanzo Kafka listening on port %d (PubSub: %s)", b.Config.BrokerPort, b.Config.PubSubUrl)
 
@@ -327,14 +333,26 @@ func (b *Broker) safeHandle(h APIKeyHandler, req types.Request) (response []byte
 	return h.Handler(req), nil
 }
 
-// Shutdown gracefully shuts down the broker
+// Addr returns the listener address once Serve has bound it, else nil.
+func (b *Broker) Addr() net.Addr {
+	if b.listener == nil {
+		return nil
+	}
+	return b.listener.Addr()
+}
+
+// Shutdown gracefully shuts down the broker. Idempotent: hosts and tests may
+// tear down on overlapping paths, and a second call must be a no-op, not a
+// closed-channel panic.
 func (b *Broker) Shutdown() {
-	close(b.ShutDownSignal)
-	if b.listener != nil {
-		b.listener.Close()
-	}
-	if b.PubSub != nil {
-		b.PubSub.Close()
-	}
-	log.Info("Hanzo Kafka shut down")
+	b.shutdownOnce.Do(func() {
+		close(b.ShutDownSignal)
+		if b.listener != nil {
+			b.listener.Close()
+		}
+		if b.PubSub != nil {
+			b.PubSub.Close()
+		}
+		log.Info("Hanzo Kafka shut down")
+	})
 }

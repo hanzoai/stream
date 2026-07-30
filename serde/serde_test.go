@@ -236,7 +236,7 @@ func TestParseHeader_NullClientID(t *testing.T) {
 	buf = binary.BigEndian.AppendUint16(buf, 11) // flexible
 	buf = binary.BigEndian.AppendUint32(buf, 5)
 	buf = binary.BigEndian.AppendUint16(buf, 0xFFFF) // null client_id
-	buf = append(buf, 0)                              // tagged_fields: 0
+	buf = append(buf, 0)                             // tagged_fields: 0
 	buf = append(buf, bodyPayload...)
 	binary.BigEndian.PutUint32(buf, uint32(len(buf)-4))
 

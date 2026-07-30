@@ -168,6 +168,33 @@ func (b *Broker) getHeartbeatResponse(req types.Request) []byte {
 	return e.Bytes()
 }
 
+// getLeaveGroupResponse acknowledges LeaveGroup (key 13). Membership is not
+// broker state here (the gateway is stateless; offsets are the durable part),
+// so leaving always succeeds — but it must be ANSWERED: every client sends it
+// on close, and an unhandled key panics the connection goroutine instead.
+func (b *Broker) getLeaveGroupResponse(req types.Request) []byte {
+	e := serde.NewEncoder()
+	e.PutInt32(req.CorrelationID)
+	if req.RequestAPIVersion >= 4 {
+		// Flexible: throttle, error, members (echoed empty), tagged fields
+		e.EndStruct()
+		e.PutInt32(0)           // throttle_time_ms
+		e.PutInt16(0)           // error_code
+		e.PutCompactArrayLen(0) // members
+		e.EndStruct()
+	} else {
+		if req.RequestAPIVersion >= 1 {
+			e.PutInt32(0) // throttle_time_ms
+		}
+		e.PutInt16(0) // error_code
+		if req.RequestAPIVersion >= 3 {
+			e.PutArrayLen(0) // members
+		}
+	}
+	e.PutLen()
+	return e.Bytes()
+}
+
 func decodeSyncGroupRequest(d serde.Decoder, req *SyncGroupRequest, apiVersion uint16) {
 	if apiVersion >= 4 {
 		// Flexible
@@ -288,6 +315,15 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 		response := OffsetFetchResponse{}
 		for _, group := range offsetFetchRequest.Groups {
 			g := OffsetFetchGroup{GroupID: group.GroupID}
+			// A null topics array asks for everything the group has committed.
+			if len(group.Topics) == 0 {
+				all, _ := b.PubSub.CommittedOffsets(group.GroupID)
+				for topicName, parts := range all {
+					for partitionIndex := range parts {
+						group.Topics = appendTopicPartition(group.Topics, topicName, partitionIndex)
+					}
+				}
+			}
 			for _, topic := range group.Topics {
 				t := OffsetFetchTopic{Name: topic.Name}
 				for _, partitionIndex := range topic.PartitionIndexes {
@@ -345,6 +381,14 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 			topics = append(topics, t)
 		}
 	}
+	if len(topics) == 0 {
+		all, _ := b.PubSub.CommittedOffsets(groupID)
+		for topicName, parts := range all {
+			for partitionIndex := range parts {
+				topics = appendTopicPartition(topics, topicName, partitionIndex)
+			}
+		}
+	}
 	log.Debug("offsetFetchRequest v%d group=%s topics=%+v", req.RequestAPIVersion, groupID, topics)
 
 	e := serde.NewEncoder()
@@ -398,6 +442,18 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 	}
 	e.PutLen()
 	return e.Bytes()
+}
+
+// appendTopicPartition merges a partition into a topic list, keeping one entry
+// per topic.
+func appendTopicPartition(topics []OffsetFetchRequestTopic, name string, partition uint32) []OffsetFetchRequestTopic {
+	for i := range topics {
+		if topics[i].Name == name {
+			topics[i].PartitionIndexes = append(topics[i].PartitionIndexes, partition)
+			return topics
+		}
+	}
+	return append(topics, OffsetFetchRequestTopic{Name: name, PartitionIndexes: []uint32{partition}})
 }
 
 func (b *Broker) getOffsetCommitResponse(req types.Request) []byte {

@@ -12,6 +12,7 @@ var offsetFetchKey = uint16(9)
 var findCoordinatorKey = uint16(10)
 var joinGroupKey = uint16(11)
 var heartbeatKey = uint16(12)
+var leaveGroupKey = uint16(13)
 var syncGroupKey = uint16(14)
 var apiVersionKey = uint16(18)
 var createTopicKey = uint16(19)
@@ -45,6 +46,8 @@ func (b *Broker) APIDispatcher(requestAPIKey uint16) APIKeyHandler {
 		return APIKeyHandler{Name: "JoinGroup", Handler: b.getJoinGroupResponse}
 	case heartbeatKey:
 		return APIKeyHandler{Name: "Heartbeat", Handler: b.getHeartbeatResponse}
+	case leaveGroupKey:
+		return APIKeyHandler{Name: "LeaveGroup", Handler: b.getLeaveGroupResponse}
 	case syncGroupKey:
 		return APIKeyHandler{Name: "SyncGroup", Handler: b.getSyncGroupResponse}
 	case apiVersionKey:

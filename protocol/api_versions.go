@@ -36,6 +36,7 @@ func (b *Broker) getAPIVersionResponse(req types.Request) []byte {
 		{APIKey: findCoordinatorKey, MinVersion: 0, MaxVersion: 6},
 		{APIKey: joinGroupKey, MinVersion: 0, MaxVersion: 9},
 		{APIKey: heartbeatKey, MinVersion: 0, MaxVersion: 4},
+		{APIKey: leaveGroupKey, MinVersion: 0, MaxVersion: 5},
 		{APIKey: syncGroupKey, MinVersion: 0, MaxVersion: 5},
 		{APIKey: apiVersionKey, MinVersion: 0, MaxVersion: 4},
 		{APIKey: createTopicKey, MinVersion: 0, MaxVersion: 7},
