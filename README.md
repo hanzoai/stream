@@ -68,7 +68,6 @@ go test -v ./...
 
 ## Credits
 
-Based on [MonKafka](https://github.com/cefboud/monkafka) by cefboud. Cluster mode inspired by [Jocko](https://github.com/travisjeffery/jocko).
 
 ## License
 
