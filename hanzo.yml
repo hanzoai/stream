@@ -1,0 +1,14 @@
+# Go Kafka-protocol broker + client. One image, and a gate that compiles the
+# module and runs the offline suites. test/e2e drives a live broker over the
+# network, so it belongs to a harness, not a push gate.
+images:
+  - name: kafka
+    context: .
+    dockerfile: Dockerfile
+    repo: ghcr.io/hanzoai/kafka
+test:
+  - name: build-and-unit
+    run: |
+      set -euo pipefail
+      go build ./...
+      go test ./protocol/... ./serde/...
