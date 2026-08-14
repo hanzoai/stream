@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync/atomic"
 )
 
 // logging levels
@@ -15,26 +16,44 @@ const (
 	ERROR = "ERROR"
 )
 
-// LogLevel defines the current logging level (default is INFO)
-var LogLevel = "INFO"
+// severity orders the levels. TRACE was missing from it, so it scored zero by
+// the absence of an entry and the order came out right by accident; saying it
+// is cheaper than rediscovering why it works.
+var severity = map[string]int{
+	TRACE: 0,
+	DEBUG: 1,
+	INFO:  2,
+	WARN:  3,
+	ERROR: 4,
+}
+
+// threshold is the level at or above which a line is written. Every goroutine
+// that logs reads it and SetLogLevel writes it, so it is held atomically — a
+// host that changes level while connections are live raced every log call.
+var threshold atomic.Value
+
+// Lines go to stdout, chosen once. This used to be a log.SetOutput on EVERY
+// line, so every connection goroutine wrote a process-global concurrently and
+// no caller could read back what was written. Choosing it here says the same
+// thing once, and a test can point the logger somewhere it can read.
+func init() {
+	threshold.Store(INFO)
+	log.SetOutput(os.Stdout)
+}
 
 // SetLogLevel sets the log level for filtering logs
 func SetLogLevel(logLevel string) {
-	LogLevel = logLevel
+	threshold.Store(logLevel)
+}
+
+// LogLevel reports the level at or above which lines are written.
+func LogLevel() string {
+	return threshold.Load().(string)
 }
 
 // Log writes a log message at a specified level, formatted with optional arguments
 func Log(level, message string, a ...any) {
-	levels := map[string]int{
-		DEBUG: 1,
-		INFO:  2,
-		WARN:  3,
-		ERROR: 4,
-	}
-
-	// Log only if the message level is greater than or equal to the current LogLevel
-	if levels[level] >= levels[LogLevel] {
-		log.SetOutput(os.Stdout)
+	if severity[level] >= severity[LogLevel()] {
 		log.Printf("[%s] %s\n", level, fmt.Sprintf(message, a...))
 	}
 }

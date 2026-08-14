@@ -22,10 +22,16 @@ type Broker struct {
 	Config         *types.Configuration
 	PubSub         *pubsub.Client
 	ShutDownSignal chan bool
-	listener       net.Listener
-	partitionMu    sync.Map // map[string]*sync.Mutex keyed by "topic-partition"
-	readHints      sync.Map // map[string]readHint keyed by "topic-partition"
-	shutdownOnce   sync.Once
+
+	// listener is published by Serve on its own goroutine and read by callers
+	// on theirs — Addr is how a caller learns the port the kernel picked, and
+	// Shutdown closes it from wherever the shutdown came from. Nothing ordered
+	// those three, so the bind raced every reader.
+	listenerMu   sync.RWMutex
+	listener     net.Listener
+	partitionMu  sync.Map // map[string]*sync.Mutex keyed by "topic-partition"
+	readHints    sync.Map // map[string]readHint keyed by "topic-partition"
+	shutdownOnce sync.Once
 }
 
 // partitionLock returns a mutex for a topic+partition, ensuring safe concurrent offset assignment.
@@ -241,12 +247,15 @@ func (b *Broker) Serve() error {
 	if err != nil {
 		return fmt.Errorf("listen :%d: %w", b.Config.BrokerPort, err)
 	}
-	b.listener = ln
-	// Port 0 asked the kernel to pick: publish the real port so Metadata and
-	// FindCoordinator advertise an address clients can actually dial.
+	// Port 0 asked the kernel to pick: settle the real port BEFORE publishing
+	// the listener, so a caller that can see the listener can also see the port
+	// Metadata and FindCoordinator will advertise.
 	if b.Config.BrokerPort == 0 {
 		b.Config.BrokerPort = ln.Addr().(*net.TCPAddr).Port
 	}
+	b.listenerMu.Lock()
+	b.listener = ln
+	b.listenerMu.Unlock()
 
 	log.Info("Hanzo Kafka listening on port %d (PubSub: %s)", b.Config.BrokerPort, b.Config.PubSubUrl)
 
@@ -298,12 +307,18 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 		}
 		req := serde.ParseHeader(buffer, connectionAddr)
 		apiKeyHandler := b.APIDispatcher(req.RequestAPIKey)
-		switch req.RequestAPIKey {
-		case listOffsetsKey, fetchKey, heartbeatKey:
-			log.Debug("Received %v v%d corr=%d from %s len=%d body=%d", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, connectionAddr, length, len(req.Body))
-		default:
-			log.Info("Received %v v%d corr=%d from %s len=%d body=%d", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, connectionAddr, length, len(req.Body))
-		}
+		// A frame that arrived is a trace, not news. This used to name three APIs
+		// as the chatty ones and log the rest at Info, which is a guess about
+		// which calls a client repeats — and the guess was wrong about the one
+		// that matters. Measured in production: Metadata was 824 of 1200 lines,
+		// 69% of everything the process said, drowning the boot errors that
+		// explain an outage inside eight minutes of a pod's history.
+		//
+		// Info is for what an operator did not already know: the broker came up,
+		// a client went away, a handler panicked. Those lines are Error and
+		// lifecycle and they stay. Every received frame is Debug, so there is no
+		// list to keep correct as APIs are added.
+		log.Debug("Received %v v%d corr=%d from %s len=%d body=%d", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, connectionAddr, length, len(req.Body))
 
 		response, handlerErr := b.safeHandle(apiKeyHandler, req)
 		if handlerErr != nil {
@@ -335,6 +350,8 @@ func (b *Broker) safeHandle(h APIKeyHandler, req types.Request) (response []byte
 
 // Addr returns the listener address once Serve has bound it, else nil.
 func (b *Broker) Addr() net.Addr {
+	b.listenerMu.RLock()
+	defer b.listenerMu.RUnlock()
 	if b.listener == nil {
 		return nil
 	}
@@ -347,8 +364,11 @@ func (b *Broker) Addr() net.Addr {
 func (b *Broker) Shutdown() {
 	b.shutdownOnce.Do(func() {
 		close(b.ShutDownSignal)
-		if b.listener != nil {
-			b.listener.Close()
+		b.listenerMu.RLock()
+		ln := b.listener
+		b.listenerMu.RUnlock()
+		if ln != nil {
+			ln.Close()
 		}
 		if b.PubSub != nil {
 			b.PubSub.Close()
