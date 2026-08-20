@@ -24,7 +24,6 @@ coverage.out
 .DS_Store
 
 # AI assistant config
-CLAUDE.md
 AGENTS.md
 GEMINI.md
 QWEN.md
