@@ -20,13 +20,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /hanzo-kafka .
 
-FROM alpine:3.20
+# One CGO_ENABLED=0 binary that talks to NATS over TLS. This base carries the CA
+# bundle and points SSL_CERT_FILE at it, so the certs need no package manager.
+FROM gcr.io/distroless/static-debian12:nonroot
 
 LABEL org.opencontainers.image.source="https://github.com/hanzoai/kafka"
 LABEL org.opencontainers.image.description="Hanzo Kafka - Kafka-compatible streaming over NATS"
 LABEL org.opencontainers.image.licenses="MIT"
 
-RUN apk add --no-cache ca-certificates
 COPY --from=builder /hanzo-kafka /usr/local/bin/hanzo-kafka
 
 EXPOSE 9092 9093
