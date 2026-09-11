@@ -1,7 +1,9 @@
 # Canonical caller — every knob lives in /hanzo.yml, none here.
-# Runs on the git-runner fleet at git.hanzo.ai, the only pool serving these
-# labels. github.com resolves only .github/workflows and has no runner for
-# them, so a caller placed there is a gate that cannot be scheduled.
+# The reusable is resolved out of .github/workflows and only there: github.com
+# accepts no other path, and the forge reads it there too. Naming
+# .hanzo/workflows resolves nothing, and it is resolved while the run is
+# INSERTED — so the push created no run at all. No run, no error, nothing to
+# read, and this repo published no image for as long as that line stood.
 name: CI/CD
 on:
   push:
@@ -11,5 +13,5 @@ on:
   workflow_dispatch:
 jobs:
   cicd:
-    uses: hanzoai/ci/.hanzo/workflows/build.yml@v1
+    uses: hanzoai/ci/.github/workflows/build.yml@v1
     secrets: inherit
