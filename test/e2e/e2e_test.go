@@ -164,7 +164,7 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 			for _, r := range got {
 				seen[string(r.Value)] = true
 			}
-			for i := 0; i < 25; i++ {
+			for i := range 25 {
 				if !seen[fmt.Sprintf("record-%04d", i)] {
 					t.Fatalf("missing record %d", i)
 				}

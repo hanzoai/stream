@@ -69,10 +69,7 @@ func (b *Broker) getAPIVersionResponse(req types.Request) []byte {
 
 	e.PutLen()
 	resp := e.Bytes()
-	hexLen := len(resp)
-	if hexLen > 60 {
-		hexLen = 60
-	}
+	hexLen := min(len(resp), 60)
 	log.Info("ApiVersions v%d response len=%d hex=%x", req.RequestAPIVersion, len(resp), resp[:hexLen])
 	return resp
 }

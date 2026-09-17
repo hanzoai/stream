@@ -72,7 +72,7 @@ func (b *Broker) partitionBounds(topic string, partition uint32) (logStart, next
 	// Head: first valid record set at or after FirstSeq.
 	seq := info.State.FirstSeq
 	var first *int64
-	for i := 0; i < boundsScanLimit; i++ {
+	for range boundsScanLimit {
 		msg, err := b.PubSub.NextMessage(topic, partition, seq)
 		if err != nil || msg == nil {
 			break
@@ -97,7 +97,7 @@ func (b *Broker) partitionBounds(topic string, partition uint32) (logStart, next
 	log.Warn("partition %s/%d tail is not a record batch; scanning", topic, partition)
 	next = *first
 	seq = info.State.FirstSeq
-	for i := 0; i < boundsScanLimit; i++ {
+	for range boundsScanLimit {
 		msg, err := b.PubSub.NextMessage(topic, partition, seq)
 		if err != nil || msg == nil {
 			break
@@ -186,7 +186,7 @@ func (b *Broker) probeFrom(topic string, partition uint32, seq uint64, wantOffse
 			return &pubsub.StoredMsg{Sequence: seq, Data: raw.Data}
 		}
 	}
-	for i := 0; i < boundsScanLimit; i++ {
+	for range boundsScanLimit {
 		msg, err := b.PubSub.NextMessage(topic, partition, seq)
 		if err != nil || msg == nil {
 			return nil

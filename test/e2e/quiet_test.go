@@ -78,7 +78,7 @@ func discardTo(t *testing.T) *guarded {
 
 func announced(out, level string) int {
 	n := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, level) && strings.Contains(line, "Received ") {
 			n++
 		}
@@ -88,7 +88,7 @@ func announced(out, level string) int {
 
 func firstFew(out, level string) string {
 	var keep []string
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, level) && strings.Contains(line, "Received ") {
 			if keep = append(keep, line); len(keep) == 5 {
 				break

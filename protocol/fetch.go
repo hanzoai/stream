@@ -94,10 +94,10 @@ func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest, apiVersion 
 	if apiVersion >= 12 {
 		// Flexible version: compact arrays/strings + tagged fields
 		lenTopic := int(d.CompactArrayLen())
-		for i := 0; i < lenTopic; i++ {
+		for range lenTopic {
 			topic := FetchRequestTopic{Name: d.CompactString()}
 			lenPartitions := int(d.CompactArrayLen())
-			for j := 0; j < lenPartitions; j++ {
+			for range lenPartitions {
 				p := FetchRequestPartitionData{
 					PartitionIndex:     d.UInt32(),
 					CurrentLeaderEpoch: d.UInt32(),
@@ -114,10 +114,10 @@ func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest, apiVersion 
 		}
 		// forgotten topics (compact array)
 		lenForgotten := int(d.CompactArrayLen())
-		for i := 0; i < lenForgotten; i++ {
+		for range lenForgotten {
 			ft := FetchRequestForgottenTopic{Topic: d.CompactString()}
 			lenParts := int(d.CompactArrayLen())
-			for j := 0; j < lenParts; j++ {
+			for range lenParts {
 				ft.Partitions = append(ft.Partitions, d.UInt32())
 			}
 			fetchRequest.ForgottenTopicsData = append(fetchRequest.ForgottenTopicsData, ft)
@@ -127,10 +127,10 @@ func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest, apiVersion 
 	} else {
 		// Non-flexible: int32 array counts, int16 strings
 		lenTopic := int(int32(d.UInt32()))
-		for i := 0; i < lenTopic; i++ {
+		for range lenTopic {
 			topic := FetchRequestTopic{Name: d.NullableString()}
 			lenPartitions := int(int32(d.UInt32()))
-			for j := 0; j < lenPartitions; j++ {
+			for range lenPartitions {
 				p := FetchRequestPartitionData{
 					PartitionIndex: d.UInt32(),
 				}
@@ -150,10 +150,10 @@ func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest, apiVersion 
 		if apiVersion >= 7 {
 			// forgotten topics (int32 array)
 			lenForgotten := int(int32(d.UInt32()))
-			for i := 0; i < lenForgotten; i++ {
+			for range lenForgotten {
 				ft := FetchRequestForgottenTopic{Topic: d.NullableString()}
 				lenParts := int(int32(d.UInt32()))
-				for j := 0; j < lenParts; j++ {
+				for range lenParts {
 					ft.Partitions = append(ft.Partitions, d.UInt32())
 				}
 				fetchRequest.ForgottenTopicsData = append(fetchRequest.ForgottenTopicsData, ft)

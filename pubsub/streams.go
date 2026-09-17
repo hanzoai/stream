@@ -41,7 +41,7 @@ func (c *Client) CreateTopicStreams(topic string, numPartitions uint32, replicas
 	if replicas < 1 {
 		replicas = 1
 	}
-	for i := uint32(0); i < numPartitions; i++ {
+	for i := range numPartitions {
 		cfg := &nats.StreamConfig{
 			Name:     StreamName(topic, i),
 			Subjects: []string{SubjectName(topic, i)},

@@ -1,6 +1,6 @@
 module github.com/hanzoai/kafka
 
-go 1.26.5
+go 1.27.1
 
 require (
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3

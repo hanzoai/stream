@@ -63,10 +63,10 @@ func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest, apiVe
 		produceRequest.Acks = d.UInt16()
 		produceRequest.TimeoutMs = d.UInt32()
 		lenTopicData := int(d.CompactArrayLen())
-		for i := 0; i < lenTopicData; i++ {
+		for range lenTopicData {
 			topic := ProduceRequestTopicData{Name: d.CompactString()}
 			lenPartitionData := int(d.CompactArrayLen())
-			for j := 0; j < lenPartitionData; j++ {
+			for range lenPartitionData {
 				topic.PartitionData = append(topic.PartitionData, ProduceRequestPartitionData{
 					Index: d.UInt32(), Records: d.CompactBytes(),
 				})
@@ -82,10 +82,10 @@ func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest, apiVe
 		produceRequest.Acks = d.UInt16()
 		produceRequest.TimeoutMs = d.UInt32()
 		lenTopicData := int(int32(d.UInt32()))
-		for i := 0; i < lenTopicData; i++ {
+		for range lenTopicData {
 			topic := ProduceRequestTopicData{Name: d.NullableString()}
 			lenPartitionData := int(int32(d.UInt32()))
-			for j := 0; j < lenPartitionData; j++ {
+			for range lenPartitionData {
 				index := d.UInt32()
 				// Records: int32 length prefix + bytes (-1 = null)
 				recordsLen := int32(d.UInt32())

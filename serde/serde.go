@@ -414,13 +414,13 @@ func (d *Decoder) Decode(x any) any {
 		if field.Type.Kind() == reflect.Slice {
 			len := int(d.CompactArrayLen())
 			if field.Type.Elem().Kind() == reflect.Struct { // Slice of structs
-				for j := 0; j < len; j++ {
+				for range len {
 					elem := reflect.New(field.Type.Elem())                    // pointer to a new struct
 					elem = reflect.ValueOf(d.Decode(elem.Interface())).Elem() // decode into new struct and dereference
 					decodedValue = reflect.Append(decodedValue, elem)
 				}
 			} else {
-				for j := 0; j < len; j++ {
+				for range len {
 					elem := reflect.New(field.Type.Elem()).Elem()
 					elem = reflect.ValueOf(d.Get(elem.Interface())) // decode basic type use `Get`
 					decodedValue = reflect.Append(decodedValue, elem)

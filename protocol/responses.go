@@ -47,7 +47,7 @@ func decodeJoinGroupRequest(d serde.Decoder, req *JoinGroupRequest, apiVersion u
 		req.GroupInstanceID = d.CompactString()
 		req.ProtocolType = d.CompactString()
 		lenProtocols := int(d.CompactArrayLen())
-		for i := 0; i < lenProtocols; i++ {
+		for range lenProtocols {
 			p := JoinGroupRequestProtocol{
 				Name:     d.CompactString(),
 				Metadata: d.CompactBytes(),
@@ -71,7 +71,7 @@ func decodeJoinGroupRequest(d serde.Decoder, req *JoinGroupRequest, apiVersion u
 		}
 		req.ProtocolType = d.NullableString()
 		lenProtocols := int(int32(d.UInt32()))
-		for i := 0; i < lenProtocols; i++ {
+		for range lenProtocols {
 			name := d.NullableString()
 			metaLen := int32(d.UInt32())
 			var metadata []byte
@@ -205,7 +205,7 @@ func decodeSyncGroupRequest(d serde.Decoder, req *SyncGroupRequest, apiVersion u
 		req.ProtocolType = d.CompactString()
 		req.ProtocolName = d.CompactString()
 		lenAssignments := int(d.CompactArrayLen())
-		for i := 0; i < lenAssignments; i++ {
+		for range lenAssignments {
 			a := SyncGroupRequestMember{
 				MemberID:   d.CompactString(),
 				Assignment: d.CompactBytes(),
@@ -223,7 +223,7 @@ func decodeSyncGroupRequest(d serde.Decoder, req *SyncGroupRequest, apiVersion u
 		}
 		// protocol_type and protocol_name are v5+ only — not in v0-v3
 		lenAssignments := int(int32(d.UInt32()))
-		for i := 0; i < lenAssignments; i++ {
+		for range lenAssignments {
 			memberID := d.NullableString()
 			assignLen := int32(d.UInt32())
 			var assignment []byte
@@ -291,17 +291,17 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 		// struct decode misparses every v8 request.
 		offsetFetchRequest := &OffsetFetchRequest{}
 		lenGroups := int(decoder.CompactArrayLen())
-		for i := 0; i < lenGroups; i++ {
+		for range lenGroups {
 			g := OffsetFetchRequestGroup{GroupID: decoder.CompactString()}
 			if req.RequestAPIVersion >= 9 {
 				g.MemberID = decoder.CompactString()
 				g.MemberEpoch = decoder.UInt32()
 			}
 			lenTopics := int(decoder.CompactArrayLen())
-			for j := 0; j < lenTopics; j++ {
+			for range lenTopics {
 				t := OffsetFetchRequestTopic{Name: decoder.CompactString()}
 				lenParts := int(decoder.CompactArrayLen())
-				for k := 0; k < lenParts; k++ {
+				for range lenParts {
 					t.PartitionIndexes = append(t.PartitionIndexes, decoder.UInt32())
 				}
 				g.Topics = append(g.Topics, t)
@@ -353,11 +353,11 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 		// v6-v7: flexible flat format
 		groupID = decoder.CompactString()
 		lenTopics := int(decoder.CompactArrayLen())
-		for i := 0; i < lenTopics; i++ {
+		for range lenTopics {
 			name := decoder.CompactString()
 			lenParts := int(decoder.CompactArrayLen())
 			t := OffsetFetchRequestTopic{Name: name}
-			for j := 0; j < lenParts; j++ {
+			for range lenParts {
 				t.PartitionIndexes = append(t.PartitionIndexes, decoder.UInt32())
 			}
 			topics = append(topics, t)
@@ -371,11 +371,11 @@ func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 		// v0-v5: non-flexible
 		groupID = decoder.NullableString()
 		lenTopics := int(int32(decoder.UInt32()))
-		for i := 0; i < lenTopics; i++ {
+		for range lenTopics {
 			name := decoder.NullableString()
 			lenParts := int(int32(decoder.UInt32()))
 			t := OffsetFetchRequestTopic{Name: name}
-			for j := 0; j < lenParts; j++ {
+			for range lenParts {
 				t.PartitionIndexes = append(t.PartitionIndexes, decoder.UInt32())
 			}
 			topics = append(topics, t)
@@ -508,10 +508,10 @@ func (b *Broker) getOffsetCommitResponse(req types.Request) []byte {
 	}
 	var topics []topicCommit
 	lenTopics := int(int32(decoder.UInt32()))
-	for i := 0; i < lenTopics; i++ {
+	for range lenTopics {
 		tc := topicCommit{name: decoder.NullableString()}
 		lenParts := int(int32(decoder.UInt32()))
-		for j := 0; j < lenParts; j++ {
+		for range lenParts {
 			partIdx := decoder.UInt32()
 			committedOffset := decoder.UInt64()
 			if req.RequestAPIVersion >= 6 {
@@ -561,10 +561,10 @@ func decodeListOffsetsRequest(d serde.Decoder, req *ListOffsetsRequest, apiVersi
 		req.ReplicaID = d.UInt32()
 		req.IsolationLevel = d.UInt8()
 		lenTopics := int(d.CompactArrayLen())
-		for i := 0; i < lenTopics; i++ {
+		for range lenTopics {
 			t := ListOffsetsRequestTopic{Name: d.CompactString()}
 			lenParts := int(d.CompactArrayLen())
-			for j := 0; j < lenParts; j++ {
+			for range lenParts {
 				p := ListOffsetsRequestPartition{
 					PartitionIndex: d.UInt32(),
 				}
@@ -585,10 +585,10 @@ func decodeListOffsetsRequest(d serde.Decoder, req *ListOffsetsRequest, apiVersi
 			req.IsolationLevel = d.UInt8()
 		}
 		lenTopics := int(int32(d.UInt32()))
-		for i := 0; i < lenTopics; i++ {
+		for range lenTopics {
 			t := ListOffsetsRequestTopic{Name: d.NullableString()}
 			lenParts := int(int32(d.UInt32()))
-			for j := 0; j < lenParts; j++ {
+			for range lenParts {
 				p := ListOffsetsRequestPartition{
 					PartitionIndex: d.UInt32(),
 				}

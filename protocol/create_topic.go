@@ -84,10 +84,7 @@ func (b *Broker) getCreateTopicResponse(req types.Request) []byte {
 			topicResponse.ErrorCode = uint16(ErrTopicAlreadyExists.Code)
 			topicResponse.ErrorMessage = ErrTopicAlreadyExists.Message
 		} else {
-			replicas := b.Config.StreamReplicas
-			if replicas < 1 {
-				replicas = 1
-			}
+			replicas := max(b.Config.StreamReplicas, 1)
 			err := b.PubSub.CreateTopicStreams(topic.Name, topic.NumPartitions, replicas, nats.FileStorage)
 			if err != nil {
 				log.Error("Error creating topic streams: %v", err)

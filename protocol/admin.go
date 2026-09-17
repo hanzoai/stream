@@ -228,7 +228,7 @@ func (b *Broker) handleGroups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, offsets)
 }
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

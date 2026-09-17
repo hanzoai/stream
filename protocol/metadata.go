@@ -64,7 +64,7 @@ func decodeMetadataRequest(d serde.Decoder, req *MetadataRequest, apiVersion uin
 	if apiVersion >= 9 {
 		// Flexible version: compact arrays, compact strings, tagged fields
 		lenTopics := int(d.CompactArrayLen())
-		for i := 0; i < lenTopics; i++ {
+		for range lenTopics {
 			topic := MetadataRequestTopic{
 				TopicID: d.UUID(),
 				Name:    d.CompactString(),
@@ -79,7 +79,7 @@ func decodeMetadataRequest(d serde.Decoder, req *MetadataRequest, apiVersion uin
 		// Non-flexible: int32 array len, int16 strings, no tagged fields
 		arrayLen := int(int32(d.UInt32()))
 		if arrayLen > 0 {
-			for i := 0; i < arrayLen; i++ {
+			for range arrayLen {
 				topic := MetadataRequestTopic{Name: d.NullableString()}
 				req.Topics = append(req.Topics, topic)
 			}
@@ -117,7 +117,7 @@ func (b *Broker) getMetadataResponse(req types.Request) []byte {
 
 		if b.PubSub.TopicExists(reqTopic.Name) {
 			numPartitions, _ := b.PubSub.GetTopicPartitionCount(reqTopic.Name)
-			for i := uint32(0); i < numPartitions; i++ {
+			for i := range numPartitions {
 				topic.Partitions = append(topic.Partitions, MetadataResponsePartition{
 					PartitionIndex: i,
 					LeaderID:       nodeID,
@@ -126,10 +126,7 @@ func (b *Broker) getMetadataResponse(req types.Request) []byte {
 				})
 			}
 		} else if metadataRequest.AllowAutoTopicCreation {
-			replicas := b.Config.StreamReplicas
-			if replicas < 1 {
-				replicas = 1
-			}
+			replicas := max(b.Config.StreamReplicas, 1)
 			b.PubSub.CreateTopicStreams(reqTopic.Name, 1, replicas, nats.FileStorage)
 			topic.Partitions = append(topic.Partitions, MetadataResponsePartition{
 				PartitionIndex: 0,
